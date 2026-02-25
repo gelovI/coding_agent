@@ -1,0 +1,30 @@
+-- PROJECTS
+CREATE TABLE project (
+  id TEXT NOT NULL PRIMARY KEY,
+  tenantId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  rootPath TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+
+createIndexProjectTenant:
+CREATE INDEX IF NOT EXISTS idx_project_tenant ON project(tenantId);
+
+listProjects:
+SELECT * FROM project
+WHERE tenantId = ?
+ORDER BY updatedAt DESC;
+
+getProject:
+SELECT * FROM project
+WHERE tenantId = ? AND id = ?
+LIMIT 1;
+
+upsertProject:
+INSERT OR REPLACE INTO project(
+  id, tenantId, name, rootPath, createdAt, updatedAt
+) VALUES (?, ?, ?, ?, ?, ?);
+
+deleteProject:
+DELETE FROM project WHERE tenantId = ? AND id = ?;

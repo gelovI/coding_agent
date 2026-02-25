@@ -1,0 +1,68 @@
+-- Conversations
+CREATE TABLE conversation (
+  id TEXT NOT NULL PRIMARY KEY,
+  tenantId TEXT NOT NULL,
+  title TEXT NOT NULL,
+  projectId TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL
+);
+
+CREATE INDEX idx_conversation_tenant ON conversation(tenantId);
+CREATE INDEX idx_conversation_updated ON conversation(updatedAt);
+
+createConversation:
+INSERT INTO conversation(
+  id, tenantId, title, projectId, createdAt, updatedAt
+) VALUES (?, ?, ?, ?, ?, ?);
+
+-- Messages
+CREATE TABLE message (
+  id TEXT NOT NULL PRIMARY KEY,
+  conversationId TEXT NOT NULL,
+  role TEXT NOT NULL,            -- SYSTEM | USER | ASSISTANT | TOOL
+  content TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  tokenCount INTEGER,            -- optional (später)
+  metaJson TEXT                  -- optional (später)
+);
+
+CREATE INDEX idx_message_conversation ON message(conversationId);
+CREATE INDEX idx_message_created ON message(createdAt);
+CREATE INDEX idx_conversation_project ON conversation(projectId);
+
+-- Basic queries
+selectConversationsByTenant:
+SELECT * FROM conversation
+WHERE tenantId = ?
+ORDER BY updatedAt DESC;
+
+selectMessagesByConversation:
+SELECT * FROM message
+WHERE conversationId = ?
+ORDER BY createdAt ASC;
+
+upsertConversation:
+INSERT OR REPLACE INTO conversation(
+  id, tenantId, title, projectId, createdAt, updatedAt
+) VALUES (?, ?, ?, ?, ?, ?);
+
+insertMessage:
+INSERT INTO message(id, conversationId, role, content, createdAt, tokenCount, metaJson)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+touchConversation:
+UPDATE conversation
+SET updatedAt = ?
+WHERE id = ?;
+
+getLatestConversationId:
+SELECT id
+FROM conversation
+WHERE tenantId = :tenantId
+AND (
+  (:hasProject = 0 AND projectId IS NULL)
+  OR (:hasProject = 1 AND projectId = :projectId)
+)
+ORDER BY updatedAt DESC
+LIMIT 1;
