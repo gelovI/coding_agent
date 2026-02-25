@@ -1,105 +1,113 @@
 # 🧠 Coding Agent
 
-A modular AI Coding Agent built with Kotlin, designed with clean architecture principles, pluggable memory layers, and long-term vector storage.
+Ein modular aufgebauter KI-Coding-Agent in Kotlin, entwickelt nach Clean-Architecture-Prinzipien mit austauschbaren Memory-Layern und persistentem Langzeitgedächtnis.
 
-This project demonstrates how to build a production-ready LLM agent with structured memory separation, local LLM integration, and persistent storage strategies.
+Dieses Projekt demonstriert, wie man einen produktionsnahen LLM-Agenten mit klarer Architektur, strukturierter Persistenz und Vektor-Datenbank-Integration entwickelt.
 
 ---
 
 ## 🚀 Features
 
-- Modular multi-module architecture
-- Clean separation between core logic and infrastructure
-- Pluggable memory system
-    - SQLDelight (structured persistence)
-    - Qdrant (vector-based long-term memory)
-- Ollama integration for local LLM execution
-- Ktor-based HTTP clients
-- Docker support
+- Mehrmodul-Architektur
+- Klare Trennung zwischen Domain und Infrastruktur
+- Austauschbares Memory-System
+    - SQLDelight (strukturierte Persistenz)
+    - Qdrant (vektorbasiertes Langzeitgedächtnis)
+- Lokale LLM-Integration über Ollama
+- Ktor HTTP-Client
+- Docker-Support
 - JVM 17
 
 ---
 
-## 🏗 Architecture
+## 🏗 Architektur
 
-The system follows a layered, modular architecture:
+Das System folgt einer modularen, geschichteten Architektur:
 
 ```
 agent-core
 │
-├── domain (interfaces, models)
+├── domain (Interfaces, Modelle)
 ├── usecases
-└── infrastructure abstractions
+└── Infrastruktur-Abstraktionen
        
 memory-sqldelight
 │
-└── structured conversation persistence
+└── Strukturierte Konversationspersistenz
 
 memory-qdrant
 │
-└── vector embedding + long-term memory retrieval
+└── Vektor-Embedding + semantische Langzeit-Speicherung
 
 ollama-client
 │
-└── local LLM interaction
+└── Lokale LLM-Integration
 
 app
 │
-└── entry point / wiring
+└── Entry Point / Dependency Wiring
 ```
 
-### Design Principles
+### Architekturprinzipien
 
-- Dependency inversion
-- Infrastructure isolated from domain
-- Memory providers swappable
-- No business logic in framework layer
-
----
-
-## 🧠 Memory System
-
-The agent separates memory into two layers:
-
-### 1️⃣ Structured Memory (SQLDelight)
-
-Used for:
-- Conversation history
-- Metadata
-- Message tracking
-- Deterministic retrieval
-
-Benefits:
-- Type-safe schema
-- Compile-time SQL validation
-- Lightweight SQLite backend
+- Dependency Inversion
+- Infrastruktur ist vom Domain-Layer entkoppelt
+- Memory-Provider sind austauschbar
+- Keine Business-Logik im Framework-Layer
+- Klare Verantwortlichkeiten pro Modul
 
 ---
 
-### 2️⃣ Long-Term Semantic Memory (Qdrant)
+## 🧠 Memory-System
 
-Used for:
-- Vector embeddings
-- Context retrieval
-- Semantic similarity search
-
-This enables:
-
-- Persistent long-term memory
-- Context injection across sessions
-- Scalable memory growth
+Der Agent trennt bewusst zwei Speicherarten:
 
 ---
 
-## 🔌 LLM Integration
+### 1️⃣ Strukturierte Persistenz (SQLDelight)
 
-The project uses:
+Verwendet für:
 
-- **Ollama** for local LLM hosting
-- HTTP client via Ktor
-- JSON serialization via kotlinx.serialization
+- Gesprächsverlauf
+- Metadaten
+- Nachrichtenhistorie
+- Deterministische Abfragen
 
-The agent communicates with the model through a clean abstraction layer, allowing model replacement without touching domain logic.
+Vorteile:
+
+- Typensichere SQL-Definitionen
+- Compile-Time-Validierung
+- Leichtgewichtige SQLite-Integration
+
+---
+
+### 2️⃣ Semantisches Langzeitgedächtnis (Qdrant)
+
+Verwendet für:
+
+- Embeddings
+- Kontext-Retrieval
+- Semantische Ähnlichkeitssuche
+- Sitzungsübergreifende Kontextanreicherung
+
+Ermöglicht:
+
+- Persistentes Langzeitgedächtnis
+- Skalierbare Speicherarchitektur
+- Kontextinjektion bei neuen Anfragen
+- Trennung von Chat-Historie und Wissensspeicher
+
+---
+
+## 🔌 LLM-Integration
+
+Die Modellanbindung erfolgt über:
+
+- **Ollama** (lokales Hosting von LLMs)
+- HTTP-Kommunikation via Ktor
+- JSON-Serialisierung mit kotlinx.serialization
+
+Die Modellkommunikation ist abstrahiert, sodass ein Modellwechsel möglich ist, ohne die Domain-Logik anzupassen.
 
 ---
 
@@ -108,7 +116,7 @@ The agent communicates with the model through a clean abstraction layer, allowin
 - Kotlin (JVM 17)
 - Gradle Kotlin DSL
 - SQLDelight 2.x
-- Qdrant
+- Qdrant (Vector Database)
 - Ollama
 - Ktor Client (CIO)
 - kotlinx.serialization
@@ -118,25 +126,25 @@ The agent communicates with the model through a clean abstraction layer, allowin
 
 ## ⚙️ Setup
 
-### 1️⃣ Start Qdrant (Docker)
+### 1️⃣ Qdrant starten (Docker)
 
 ```bash
 docker run -p 6333:6333 qdrant/qdrant
 ```
 
-### 2️⃣ Start Ollama
+### 2️⃣ Ollama starten
 
 ```bash
 ollama run llama3
 ```
 
-### 3️⃣ Build Project
+### 3️⃣ Projekt bauen
 
 ```bash
 ./gradlew build
 ```
 
-### 4️⃣ Run Application
+### 4️⃣ Anwendung starten
 
 ```bash
 ./gradlew run
@@ -144,39 +152,39 @@ ollama run llama3
 
 ---
 
-## 📈 Why This Project Matters
+## 📈 Projektziel
 
-This project demonstrates:
+Dieses Projekt demonstriert:
 
-- Practical AI agent architecture
-- Memory abstraction patterns
-- Clean separation of concerns
-- Real-world LLM system design
-- Vector database integration
+- Architektur für KI-Agenten
+- Saubere Memory-Abstraktion
+- Trennung zwischen strukturierter Persistenz und Vektorspeicher
+- Integration lokaler Large Language Models
+- Praxisnahe AI-Systemarchitektur in Kotlin
 
-It is not a toy chatbot — it is an extensible agent foundation.
-
----
-
-## 🔮 Future Improvements
-
-- Embedding batching
-- Memory pruning strategies
-- Tool calling
-- Streaming responses
-- Multi-agent coordination
-- REST API layer
-- Observability (metrics + logging)
+Es handelt sich nicht um einen einfachen Chatbot, sondern um eine erweiterbare Agent-Basis mit klarer Systemarchitektur.
 
 ---
 
-## 📄 License
+## 🔮 Geplante Erweiterungen
+
+- Embedding-Batching
+- Memory-Pruning-Strategien
+- Tool-Calling-Mechanismen
+- Streaming-Responses
+- REST-API
+- Observability (Logging, Metriken)
+- Multi-Agent-Strukturen
+
+---
+
+## 📄 Lizenz
 
 MIT
 
 ---
 
-## 👤 Author
+## 👤 Autor
 
 Ivan Angelov  
-Kotlin Developer | AI Systems | Clean Architecture
+Kotlin Developer | AI-Systeme | Clean Architecture
