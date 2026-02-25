@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm")
-    id("app.cash.sqldelight")
+    id("app.cash.sqldelight") version "2.0.2"
 }
 
 kotlin { jvmToolchain(17) }
