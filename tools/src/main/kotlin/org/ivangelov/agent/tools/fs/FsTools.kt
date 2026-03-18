@@ -65,32 +65,51 @@ class ReadFileTool(
 }
 
 class WriteFileTool(
-    private val root: Path
+    private val root: Path,
+    private val guard: ExecutionGuard = ExecutionGuard(root)
 ) : Tool {
+
     override val name: String = "write_file"
 
     override suspend fun execute(call: ToolCall): ToolResult {
         val rel = call.argsJson.str("path")
             ?: return ToolResult(name, ok = false, content = "Missing argument: path")
+
         val content = call.argsJson.str("content")
             ?: return ToolResult(name, ok = false, content = "Missing argument: content")
 
-        val target = resolveSafe(rel)
-
         return try {
-            FileSystem.SYSTEM.createDirectories(target.parent!!)
-            FileSystem.SYSTEM.write(target) { writeUtf8(content) }
-            ToolResult(name, ok = true, content = "Wrote ${target.name}")
+            guard.validateWrite(rel, content)
+
+            val target = resolveSafe(rel)
+            target.parent?.let { FileSystem.SYSTEM.createDirectories(it) }
+            FileSystem.SYSTEM.write(target) {
+                writeUtf8(content)
+            }
+
+            ToolResult(
+                name = name,
+                ok = true,
+                content = "Wrote $rel",
+                meta = mapOf("path" to rel)
+            )
+        } catch (e: IllegalArgumentException) {
+            ToolResult(name, ok = false, content = "Execution guard blocked write_file: ${e.message}")
         } catch (e: Exception) {
             ToolResult(name, ok = false, content = "write_file failed: ${e.message}")
         }
     }
 
-    private fun resolveSafe(raw: String): Path {
-        val p = raw.trim().toPath()
-        val abs = (root / p).normalized()
-        require(abs.toString().startsWith(root.toString())) { "Path escapes root" }
-        return abs
+    private fun resolveSafe(relative: String): Path {
+        val relPath = relative.toPath(normalize = true)
+        val normalizedRoot = root.normalized()
+        val resolved = (normalizedRoot / relPath).normalized()
+
+        require(resolved.toString().startsWith(normalizedRoot.toString())) {
+            "Path escapes project root: $relative"
+        }
+
+        return resolved
     }
 }
 
