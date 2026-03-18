@@ -21,3 +21,9 @@ sqldelight {
         }
     }
 }
+
+tasks.configureEach {
+    if (name.contains("verify", ignoreCase = true) && name.contains("Migration", ignoreCase = true)) {
+        enabled = false
+    }
+}

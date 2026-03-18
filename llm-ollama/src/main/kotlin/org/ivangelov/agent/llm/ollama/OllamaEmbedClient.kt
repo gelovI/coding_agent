@@ -7,12 +7,13 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.*
 import kotlinx.serialization.Serializable
 import org.ivangelov.agent.core.infrastructure.HttpClients
+import org.ivangelov.agent.memory.core.EmbeddingClient
 
 class OllamaEmbedClient(
     private val http: HttpClient = HttpClients.llm,
     private val baseUrl: String = "http://127.0.0.1:11434",
     private val model: String = "mxbai-embed-large:latest"
-) {
+) : EmbeddingClient {
     @Serializable
     private data class EmbedRequest(
         val model: String,
@@ -24,7 +25,7 @@ class OllamaEmbedClient(
         val embedding: List<Double>
     )
 
-    suspend fun embed(text: String): FloatArray {
+    override suspend fun embed(text: String): FloatArray {
         val response = http.post("$baseUrl/api/embeddings") {
             contentType(ContentType.Application.Json)
             setBody(EmbedRequest(model = model, prompt = text))

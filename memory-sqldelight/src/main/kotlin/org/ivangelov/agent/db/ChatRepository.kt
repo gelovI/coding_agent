@@ -22,7 +22,7 @@ class ChatRepository(
         val now = clock.now().toEpochMilliseconds()
         val id = UUID.randomUUID().toString()
 
-        // ✅ upsertConversation muss projectId speichern
+        // upsertConversation muss projectId speichern
         db.agentDbQueries.upsertConversation(
             id = id,
             tenantId = tenantId,

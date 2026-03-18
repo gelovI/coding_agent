@@ -14,5 +14,5 @@ data class AgentPlan(
 @Serializable
 data class PlannedToolCall(
     val name: String,
-    @SerialName("arguments") val args: JsonObject = buildJsonObject { }
+    val args: JsonObject = buildJsonObject { }
 )

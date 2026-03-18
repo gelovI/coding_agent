@@ -8,7 +8,6 @@ import org.ivangelov.agent.tools.Tool
 import org.ivangelov.agent.memory.service.MemoryService
 import org.ivangelov.agent.memory.core.MemoryScope
 import org.ivangelov.agent.tools.code.indexing.CodeChunker
-import org.ivangelov.agent.core.model.ChatMessage
 import org.ivangelov.agent.memory.core.MemoryType
 
 class IndexProjectTool(

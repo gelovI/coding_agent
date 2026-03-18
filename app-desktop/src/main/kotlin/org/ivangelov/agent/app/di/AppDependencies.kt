@@ -39,14 +39,14 @@ class AppDependencies private constructor(
             val http = HttpClients.llm
 
             val llm = org.ivangelov.agent.llm.ollama.OllamaLlmClient(
-                model = "gpt-oss:20b",
+                model = "qwen2.5-coder:14b",
                 http = http
             )
 
             // memory pipeline (shared)
             val embed = org.ivangelov.agent.llm.ollama.OllamaEmbedClient(http = http)
             val qdrant = org.ivangelov.agent.memory.qdrant.QdrantMemoryStore(http = http)
-            val memory = org.ivangelov.agent.memory.service.MemoryService(embed = embed, store = qdrant)
+            val memory = MemoryService(embed = embed, store = qdrant)
 
             // ToolRegistry factory per root
             fun toolRegistryFor(
@@ -61,6 +61,7 @@ class AppDependencies private constructor(
                         org.ivangelov.agent.tools.fs.ListDirTool(root),
                         org.ivangelov.agent.tools.fs.ReadFileTool(root),
                         org.ivangelov.agent.tools.fs.WriteFileTool(root),
+                        org.ivangelov.agent.tools.fs.WriteFilesTool(root),
 
                         // Project indexing into vector memory
                         org.ivangelov.agent.tools.code.IndexProjectTool(

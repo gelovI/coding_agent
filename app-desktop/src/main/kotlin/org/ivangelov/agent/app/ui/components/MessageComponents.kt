@@ -39,15 +39,43 @@ import kotlinx.coroutines.delay
 @Composable
 fun MessageBubble(role: String, text: String) {
     val isUser = role == "USER"
-    val align = if (isUser) Alignment.End else Alignment.Start
+    val isTool = role == "TOOL"
 
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = align) {
+    val align = if (isUser) Alignment.End else Alignment.Start
+    val shape = RoundedCornerShape(16.dp)
+
+    val containerColor = when {
+        isUser -> MaterialTheme.colorScheme.primaryContainer
+        isTool -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    val roleLabel = when (role) {
+        "USER" -> "Du"
+        "ASSISTANT" -> "Agent"
+        "TOOL" -> "Tool"
+        else -> role
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = align
+    ) {
         Surface(
-            tonalElevation = 2.dp,
-            shape = RoundedCornerShape(16.dp)
+            tonalElevation = if (isTool) 0.dp else 2.dp,
+            shape = shape,
+            color = containerColor,
+            modifier = if (isTool) {
+                Modifier.fillMaxWidth(0.92f)
+            } else {
+                Modifier
+            }
         ) {
             Column(Modifier.padding(12.dp)) {
-                Text(role, style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = roleLabel,
+                    style = MaterialTheme.typography.labelMedium
+                )
                 Spacer(Modifier.height(6.dp))
                 RenderRichText(text)
             }

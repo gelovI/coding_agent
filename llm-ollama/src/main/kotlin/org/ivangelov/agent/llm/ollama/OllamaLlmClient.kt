@@ -18,10 +18,17 @@ import io.ktor.http.ContentType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.JsonObject
 import org.ivangelov.agent.core.infrastructure.HttpClients
+import org.ivangelov.agent.core.ports.LlmResponse
+import org.ivangelov.agent.core.ports.LlmResponseFormat
+import org.ivangelov.agent.core.ports.LlmToolCall
+import org.ivangelov.agent.core.agent.AgentError
+import org.ivangelov.agent.core.agent.AgentResult
+import org.ivangelov.agent.core.agent.PlanParser
+import org.ivangelov.agent.core.ports.ToolModeResponse
 
 class OllamaLlmClient(
     private val baseUrl: String = "http://localhost:11434",
-    private val model: String = "gpt-oss:20b",
+    private val model: String = "qwen2.5-coder:14b",
     private val http: HttpClient = HttpClients.llm
 ) : LLMClient {
 
@@ -30,14 +37,26 @@ class OllamaLlmClient(
         encodeDefaults = true
     }
 
-    suspend fun completeRaw(messages: List<ChatMessage>, context: ContextPack): OllamaChatResponse {
+    override suspend fun complete(
+        messages: List<ChatMessage>,
+        context: ContextPack,
+        format: LlmResponseFormat
+    ): LlmResponse {
         val enriched = buildContextInjectedMessages(messages, context)
 
         val req = OllamaChatRequest(
             model = model,
             stream = false,
             messages = enriched.map { it.toOllama() },
-            format = "json"
+            options = OllamaOptions(
+                temperature = 0.0,
+                topP = 0.1,
+                numCtx = 4096
+            ),
+            format = when (format) {
+                LlmResponseFormat.TEXT -> null
+                LlmResponseFormat.JSON -> "json"
+            }
         )
 
         val resp: HttpResponse = http.post("$baseUrl/api/chat") {
@@ -47,19 +66,32 @@ class OllamaLlmClient(
 
         val body = resp.bodyAsText()
 
-        println("=== HTTP STATUS === ${resp.status}")
-        println("=== RAW HTTP BODY ===")
-        println(body)
-        println("=====================")
-
         if (!resp.status.isSuccess()) {
             throw IllegalStateException("Ollama HTTP ${resp.status.value}: $body")
         }
 
-        return json.decodeFromString(OllamaChatResponse.serializer(), body)
+        val decoded = json.decodeFromString(OllamaChatResponse.serializer(), body)
+
+        return LlmResponse(
+            content = decoded.message?.content,
+            thinking = decoded.message?.thinking,
+            toolCalls = decoded.message?.toolCalls
+                ?.mapNotNull { tc ->
+                    val fn = tc.function ?: return@mapNotNull null
+                    LlmToolCall(
+                        name = fn.name,
+                        args = fn.arguments ?: JsonObject(emptyMap())
+                    )
+                }
+                .orEmpty(),
+            raw = body
+        )
     }
 
-    override fun streamReply(messages: List<ChatMessage>, context: ContextPack): Flow<String> = flow {
+    override suspend fun completeToolMode(
+        messages: List<ChatMessage>,
+        context: ContextPack
+    ): AgentResult<ToolModeResponse> {
         val enriched = buildContextInjectedMessages(messages, context)
 
         val req = OllamaChatRequest(
@@ -72,6 +104,99 @@ class OllamaLlmClient(
                 numCtx = 4096
             ),
             format = "json"
+        )
+
+        return runCatching {
+            val resp: HttpResponse = http.post("$baseUrl/api/chat") {
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+
+            val body = resp.bodyAsText()
+
+            println("=== TOOL MODE HTTP STATUS === ${resp.status}")
+            println("=== TOOL MODE RAW HTTP BODY ===")
+            println(body)
+            println("==============================")
+
+            if (!resp.status.isSuccess()) {
+                return AgentResult.Failure(
+                    AgentError.LlmFailure("Ollama HTTP ${resp.status.value}: $body")
+                )
+            }
+
+            val decoded = json.decodeFromString(OllamaChatResponse.serializer(), body)
+            val payload = decoded.message
+
+            val nativeToolCalls = payload?.toolCalls
+                ?.mapNotNull { tc ->
+                    val fn = tc.function ?: return@mapNotNull null
+                    LlmToolCall(
+                        name = fn.name,
+                        args = fn.arguments ?: JsonObject(emptyMap())
+                    )
+                }
+                .orEmpty()
+
+            val contentText = payload?.content.orEmpty()
+            val thinkingText = payload?.thinking.orEmpty()
+
+            val parsedContentPlan =
+                if (nativeToolCalls.isEmpty() && contentText.isNotBlank()) {
+                    PlanParser.parseOrNull(contentText)
+                } else {
+                    null
+                }
+
+            val finalToolCalls = when {
+                nativeToolCalls.isNotEmpty() -> nativeToolCalls
+                parsedContentPlan != null -> parsedContentPlan.toolCalls.map {
+                    LlmToolCall(
+                        name = it.name,
+                        args = it.args
+                    )
+                }
+                else -> emptyList()
+            }
+
+            val finalReply = when {
+                nativeToolCalls.isNotEmpty() -> payload?.content
+                parsedContentPlan != null -> parsedContentPlan.reply
+                else -> payload?.content
+            }
+
+            println("DEBUG_COMPLETE_TOOL_MODE_FINAL")
+            println("finalToolCalls=$finalToolCalls")
+            println("finalReply=$finalReply")
+
+            AgentResult.Success(
+                ToolModeResponse(
+                    toolCalls = finalToolCalls,
+                    reply = finalReply,
+                    rawContent = payload?.content,
+                    rawThinking = payload?.thinking
+                )
+            )
+        }.getOrElse { e ->
+            AgentResult.Failure(
+                AgentError.LlmFailure("${e::class.simpleName}: ${e.message}")
+            )
+        }
+    }
+
+    override fun streamReply(messages: List<ChatMessage>, context: ContextPack): Flow<String> = flow {
+        val enriched = buildContextInjectedMessages(messages, context)
+
+        val req = OllamaChatRequest(
+            model = model,
+            stream = true,
+            messages = enriched.map { it.toOllama() },
+            options = OllamaOptions(
+                temperature = 0.0,
+                topP = 0.1,
+                numCtx = 4096
+            ),
+            format = null
         )
 
         val resp: HttpResponse = http.post("$baseUrl/api/chat") {

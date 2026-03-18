@@ -11,6 +11,7 @@ import okio.Path
 import org.ivangelov.agent.app.di.ProjectRootResolver
 import org.ivangelov.agent.app.util.Logger
 import org.ivangelov.agent.core.model.ChatMessage
+import org.ivangelov.agent.core.agent.AgentEvent
 
 class ChatController(
     private val scope: CoroutineScope,
@@ -125,7 +126,6 @@ class ChatController(
         val text = input.trim()
         if (text.isEmpty()) return
 
-        // prevent parallel sends
         cancelActiveSend("new send")
 
         input = ""
@@ -134,26 +134,73 @@ class ChatController(
         sendJob = scope.launch {
             try {
                 streamingAssistant = ""
-                a.send(text).collect { delta ->
-                    streamingAssistant += delta
-                }
-                // DB sync
-                history = chatRepo.loadMessages(cid).map {
-                    ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
+
+                a.send(text).collect { event ->
+                    when (event) {
+                        is AgentEvent.UserMessageStored -> {
+                            history = chatRepo.loadMessages(cid).map {
+                                ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
+                            }
+                        }
+
+                        is AgentEvent.StreamDelta -> {
+                            appendAssistantDelta(event.text)
+                        }
+
+                        is AgentEvent.ToolExecuted -> {
+                            if (streamingAssistant.isNotBlank()) {
+                                appendHistoryMessage(
+                                    ChatMessage(ChatMessage.Role.ASSISTANT, streamingAssistant)
+                                )
+                                streamingAssistant = ""
+                            }
+
+                            appendHistoryMessage(
+                                ChatMessage(
+                                    ChatMessage.Role.TOOL,
+                                    "[${event.toolName}]\n${event.output}"
+                                )
+                            )
+                        }
+
+                        is AgentEvent.AssistantMessage -> {
+                            if (streamingAssistant.isNotBlank()) {
+                                streamingAssistant = ""
+                            }
+
+                            appendHistoryMessage(
+                                ChatMessage(ChatMessage.Role.ASSISTANT, event.text)
+                            )
+                        }
+
+                        AgentEvent.Completed -> {
+                            history = chatRepo.loadMessages(cid).map {
+                                ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
+                            }
+                            streamingAssistant = ""
+                            isSending = false
+                        }
+                    }
                 }
             } catch (ce: CancellationException) {
-                // expected on project-switch or manual cancel
                 logger.info("Send cancelled: ${ce.message ?: "no message"}")
                 throw ce
             } catch (t: Throwable) {
                 logger.error("Send failed", t)
             } finally {
-                // Clear streaming preview and reset sending state
                 streamingAssistant = ""
                 isSending = false
                 sendJob = null
             }
         }
+    }
+
+    private fun appendAssistantDelta(delta: String) {
+        streamingAssistant += delta
+    }
+
+    private fun appendHistoryMessage(message: ChatMessage) {
+        history = history + message
     }
 
     private fun ensureConversationAndReload() {

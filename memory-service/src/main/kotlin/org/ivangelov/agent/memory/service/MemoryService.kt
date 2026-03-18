@@ -1,15 +1,13 @@
 package org.ivangelov.agent.memory.service
 
 import org.ivangelov.agent.core.model.ChatMessage
-import org.ivangelov.agent.llm.ollama.OllamaEmbedClient
 import org.ivangelov.agent.memory.core.*
-import org.ivangelov.agent.memory.qdrant.QdrantMemoryStore
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 class MemoryService(
-    private val embed: OllamaEmbedClient,
-    private val store: QdrantMemoryStore,
+    private val embed: EmbeddingClient,
+    private val store: MemoryStore,
     private val policy: MemoryPolicy = MemoryPolicy.Default
 ) {
     suspend fun debugCountPoints(): Int = store.countPoints()
@@ -22,7 +20,7 @@ class MemoryService(
         query: String,
         topK: Int = 8,
         minScore: Double = 0.55
-    ): List<ChatMessage> {
+    ): List<RetrievedMemory> {
         if (query.isBlank()) return emptyList()
 
         val qVec = embed.embed(query)
@@ -39,9 +37,19 @@ class MemoryService(
         )
 
         // Normal: filter by minScore
-        val finalHits = hits.take(minOf(topK, hits.size))
+        val finalHits = hits
+            .filter { it.score >= minScore }
+            .take(topK)
 
-        return finalHits.map { ChatMessage(ChatMessage.Role.SYSTEM, it.text.trim().take(350)) }
+        return finalHits.map {
+            RetrievedMemory(
+                text = it.text.trim().take(350),
+                score = it.score,
+                scope = it.scope,
+                projectId = it.projectId,
+                ts = it.ts
+            )
+        }
     }
 
     suspend fun maybeStoreTurn(

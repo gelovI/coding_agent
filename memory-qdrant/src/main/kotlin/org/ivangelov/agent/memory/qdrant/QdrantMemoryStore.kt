@@ -1,7 +1,5 @@
 package org.ivangelov.agent.memory.qdrant
 
-import org.ivangelov.agent.memory.core.MemoryRetriever
-import org.ivangelov.agent.memory.core.MemoryWriter
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -10,12 +8,13 @@ import io.ktor.http.*
 import kotlinx.serialization.json.*
 import org.ivangelov.agent.core.infrastructure.HttpClients
 import org.ivangelov.agent.memory.core.*
+import org.ivangelov.agent.memory.core.MemoryStore
 
 class QdrantMemoryStore(
     private val http: HttpClient = HttpClients.qdrant,
     private val baseUrl: String = "http://127.0.0.1:6333",
     private val collection: String = "agent_memory"
-) : MemoryWriter, MemoryRetriever {
+) : MemoryStore {
 
     suspend fun ensureCollection(vectorSize: Int) {
         val check = http.get("$baseUrl/collections/$collection")
@@ -92,7 +91,7 @@ class QdrantMemoryStore(
         error("Call searchWithVector(...) via MemoryService wrapper")
     }
 
-    suspend fun searchWithVector(
+    override suspend fun searchWithVector(
         tenantId: String,
         scope: MemoryScope,
         projectId: String?,
@@ -104,8 +103,6 @@ class QdrantMemoryStore(
         val filter = buildScopeKeyFilter(tenantId, scope, projectId)
 
         val reqJson = buildJsonObject {
-            // Qdrant expects either "vector": [...] OR named vector object.
-            // Since your collection uses named vector "default", we send the named form:
             putJsonObject("vector") {
                 put("name", "default")
                 putJsonArray("vector") {
@@ -166,36 +163,6 @@ class QdrantMemoryStore(
         }.sortedByDescending { it.score }
     }
 
-    suspend fun debugGetPointRaw(id: String): String {
-        val resp = http.post("$baseUrl/collections/$collection/points") {
-            contentType(ContentType.Application.Json)
-            setBody(
-                QdrantGetPointsRequest(
-                    ids = listOf(id),
-                    with_payload = true,
-                    with_vector = false
-                )
-            )
-        }
-
-        val raw = resp.bodyAsText()
-        println("QDRANT_GET_STATUS=${resp.status}")
-        println("QDRANT_GET_BODY=$raw")
-
-        return raw
-    }
-
-    suspend fun debugGetPointRawGet(id: String): String {
-        val resp = http.get("$baseUrl/collections/$collection/points/$id") {
-            parameter("with_payload", "true")
-            parameter("with_vector", "false")
-        }
-        val raw = resp.bodyAsText()
-        println("QDRANT_GET2_STATUS=${resp.status}")
-        println("QDRANT_GET2_BODY=$raw")
-        return raw
-    }
-
     private fun buildScopeKeyFilter(
         tenantId: String,
         scope: MemoryScope,
@@ -224,7 +191,7 @@ class QdrantMemoryStore(
         }
     }
 
-    suspend fun countPoints(): Int {
+    override suspend fun countPoints(): Int {
         val resp: QdrantCountResponse = http.post("$baseUrl/collections/$collection/points/count") {
             contentType(ContentType.Application.Json)
             setBody(QdrantCountRequest(exact = true))

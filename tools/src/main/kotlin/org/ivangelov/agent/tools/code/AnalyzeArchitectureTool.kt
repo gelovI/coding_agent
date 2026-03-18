@@ -25,7 +25,7 @@ class AnalyzeArchitectureTool(
             topK = 20
         )
 
-        val combined = retrieved.joinToString("\n\n") { it.content }
+        val combined = retrieved.joinToString("\n\n") { it.text }
 
         return ToolResult(
             name = name,

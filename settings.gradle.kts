@@ -26,8 +26,6 @@ include(
     ":memory-qdrant",
     ":memory-sqldelight",
     ":tools",
-    ":llm-ollama"
+    ":llm-ollama",
+    ":memory-service"
 )
-
-include("llm-ollama")
-include("memory-service")
