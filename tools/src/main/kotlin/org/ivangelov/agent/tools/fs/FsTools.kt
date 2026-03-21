@@ -1,6 +1,7 @@
 package org.ivangelov.agent.tools.fs
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okio.FileSystem
@@ -16,16 +17,16 @@ class ListDirTool(
     override val name: String = "list_dir"
 
     override suspend fun execute(call: ToolCall): ToolResult {
-        val rel = call.argsJson.str("path") ?: "."
-        val target = resolveSafe(rel)
+        val rel = call.argsJson.str("path")
+            ?.trim()
+            ?: return ToolResult(name, ok = false, content = "Missing argument: path")
 
         return try {
-            val items = FileSystem.SYSTEM.list(target)
-                .map { it.name }
-                .sorted()
-            ToolResult(name, ok = true, content = items.joinToString("\n"))
+            val target = resolveSafe(rel)
+            val text = FileSystem.SYSTEM.read(target) { readUtf8() }
+            ToolResult(name, ok = true, content = text)
         } catch (e: Exception) {
-            ToolResult(name, ok = false, content = "list_dir failed: ${e.message}")
+            ToolResult(name, ok = false, content = "read_file failed: ${e.message}")
         }
     }
 
@@ -82,6 +83,15 @@ class WriteFileTool(
             guard.validateWrite(rel, content)
 
             val target = resolveSafe(rel)
+            val overwrite = call.argsJson["overwrite"]?.jsonPrimitive?.booleanOrNull ?: false
+
+            if (FileSystem.SYSTEM.exists(target) && !overwrite) {
+                return ToolResult(
+                    name = name,
+                    ok = false,
+                    content = "Refusing to overwrite existing file without overwrite=true: $rel"
+                )
+            }
             target.parent?.let { FileSystem.SYSTEM.createDirectories(it) }
             FileSystem.SYSTEM.write(target) {
                 writeUtf8(content)
@@ -114,5 +124,5 @@ class WriteFileTool(
 }
 
 // ---- Json helpers ----
-private fun JsonObject.str(key: String): String? =
+fun JsonObject.str(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull

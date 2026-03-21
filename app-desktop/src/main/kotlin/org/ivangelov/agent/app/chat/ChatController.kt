@@ -20,6 +20,7 @@ class ChatController(
     private val projectRepo: org.ivangelov.agent.db.ProjectRepository,
     private val rootResolver: ProjectRootResolver,
     private val defaultRoot: Path,
+    private val cleanupService: org.ivangelov.agent.app.chat.ChatCleanupService,
     private val createAgent: (
         tenantId: String,
         conversationId: String,
@@ -116,6 +117,80 @@ class ChatController(
             input = ""
             streamingAssistant = ""
             reloadHistory()
+        }
+    }
+
+    fun clearChat() {
+        val cid = conversationId ?: return
+
+        scope.launch {
+            cancelActiveSend("clear chat")
+
+            try {
+                chatRepo.clearMessages(cid)
+                input = ""
+                streamingAssistant = ""
+                history = emptyList()
+                logger.info("Chat cleared for conversationId=$cid")
+            } catch (t: Throwable) {
+                logger.error("Clear chat failed", t)
+            }
+        }
+    }
+
+    fun clearChatAndMemory() {
+        val cid = conversationId ?: return
+
+        scope.launch {
+            cancelActiveSend("clear chat and memory")
+
+            try {
+                val ok = cleanupService.clearChatAndMemory(
+                    tenantId = tenantId,
+                    conversationId = cid
+                )
+
+                input = ""
+                streamingAssistant = ""
+                history = emptyList()
+
+                logger.info("Chat + memory cleared for conversationId=$cid success=$ok")
+            } catch (t: Throwable) {
+                logger.error("Clear chat and memory failed", t)
+            }
+        }
+    }
+
+    fun deleteCurrentConversationAndStartNew() {
+        val cid = conversationId ?: return
+        val pid = activeProjectId
+
+        scope.launch {
+            cancelActiveSend("delete current conversation")
+
+            try {
+                cleanupService.deleteConversationCompletely(
+                    tenantId = tenantId,
+                    conversationId = cid
+                )
+
+                if (pid == null) {
+                    val newId = chatRepo.createConversation(
+                        tenantId = tenantId,
+                        title = "Global Session",
+                        projectId = null
+                    )
+                    globalConversationId = newId
+                }
+
+                ensureConversationAndReload()
+
+                input = ""
+                streamingAssistant = ""
+                logger.info("Deleted current conversation and started new one")
+            } catch (t: Throwable) {
+                logger.error("Delete current conversation failed", t)
+            }
         }
     }
 

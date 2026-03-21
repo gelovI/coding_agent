@@ -48,6 +48,17 @@ Rules:
      - "path"
      - "content"
 9. Only return a final reply when the task is fully completed.
+10. When the user asks to add comments to existing code:
+    - add real explanatory comments
+    - do not add TODO comments
+    - do not add placeholder comments
+    - do not append a generic note at the end of the file
+    - prefer replace_in_file with exact existing code fragments
+
+11. For replace_in_file:
+    - read the file first if needed
+    - "search" must be exact text that already exists in the file
+    - do not invent search text
 
 Example 1:
 {
@@ -57,34 +68,6 @@ Example 1:
       "args": {
         "path": "domain/User.kt",
         "content": "data class User(val id: String)"
-      }
-    }
-  ],
-  "reply": ""
-}
-
-Example 2:
-{
-  "tool_calls": [
-    {
-      "name": "write_file",
-      "args": {
-        "path": "domain/User.kt",
-        "content": "data class User(val id: String)"
-      }
-    },
-    {
-      "name": "write_file",
-      "args": {
-        "path": "service/UserService.kt",
-        "content": "class UserService"
-      }
-    },
-    {
-      "name": "write_file",
-      "args": {
-        "path": "repository/UserRepository.kt",
-        "content": "class UserRepository"
       }
     }
   ],
@@ -122,6 +105,30 @@ Example 4:
   ],
   "reply": ""
 }
+
+For replace_in_file:
+
+You MUST provide all required fields:
+- path: string (relative file path)
+- search: exact existing text from the file
+- replace: new text to insert
+
+The "search" value MUST exactly match existing content from the file.
+
+Example:
+{
+  "tool_calls": [
+    {
+      "name": "replace_in_file",
+      "args": {
+        "path": "app/src/Main.kt",
+        "search": "fun main() {",
+        "replace": "// entry point\nfun main() {"
+      }
+    }
+  ],
+  "reply": ""
+}
 """.trimIndent()
 
     fun toolModeWithAvailableTools(tools: ToolRegistry): String {
@@ -140,6 +147,12 @@ IMPORTANT:
 - If multiple files or multiple steps are required, plan and execute multiple tool calls across multiple iterations.
 - If the user asks to create multiple files, prefer "write_files" instead of repeated "write_file" calls.
 - If no tool is needed, return an empty tool_calls array and fill reply.
+- When modifying an existing file:
+- NEVER use write_file unless the full file content is intentionally replaced
+- Prefer replace_in_file for targeted edits
+- Prefer append_to_file only for true end-of-file additions
+- If a file already exists, write_file requires overwrite=true
+- For comments inside existing code, use replace_in_file, not write_file
 """.trimIndent()
     }
 

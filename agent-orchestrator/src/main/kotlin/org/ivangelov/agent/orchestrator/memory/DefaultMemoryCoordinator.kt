@@ -124,4 +124,30 @@ class DefaultMemoryCoordinator(
             ChatMessage(ChatMessage.Role.SYSTEM, it.text)
         }
     }
+
+    override suspend fun clearConversationMemory(
+        tenantId: String,
+        conversationId: String
+    ): Boolean {
+        return runCatching {
+            memory.deleteConversationMemory(tenantId, conversationId)
+        }.getOrDefault(false)
+    }
+
+    override suspend fun clearProjectMemory(
+        tenantId: String,
+        projectId: String
+    ): Boolean {
+        return runCatching {
+            memory.deleteProjectMemory(tenantId, projectId)
+        }.getOrDefault(false)
+    }
+
+    override suspend fun clearTenantMemory(
+        tenantId: String
+    ): Boolean {
+        return runCatching {
+            memory.deleteTenantMemory(tenantId)
+        }.getOrDefault(false)
+    }
 }

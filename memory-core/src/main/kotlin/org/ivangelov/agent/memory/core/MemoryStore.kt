@@ -11,4 +11,7 @@ interface MemoryStore : MemoryWriter, MemoryRetriever {
     ): List<MemoryHit>
 
     suspend fun countPoints(): Int
+    suspend fun deleteConversationMemory(tenantId: String, conversationId: String): Boolean
+    suspend fun deleteProjectMemory(tenantId: String, projectId: String): Boolean
+    suspend fun deleteTenantMemory(tenantId: String): Boolean
 }

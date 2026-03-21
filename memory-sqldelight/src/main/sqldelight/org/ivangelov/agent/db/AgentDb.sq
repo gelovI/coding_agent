@@ -66,3 +66,34 @@ AND (
 )
 ORDER BY updatedAt DESC
 LIMIT 1;
+
+-- Delete Queries
+deleteMessagesByConversation:
+DELETE FROM message
+WHERE conversationId = ?;
+
+deleteConversationById:
+DELETE FROM conversation
+WHERE id = ?;
+
+deleteConversationsByProject:
+DELETE FROM conversation
+WHERE tenantId = ? AND projectId = ?;
+
+deleteMessagesByProject:
+DELETE FROM message
+WHERE conversationId IN (
+  SELECT id FROM conversation
+  WHERE tenantId = ? AND projectId = ?
+);
+
+deleteAllMessagesByTenant:
+DELETE FROM message
+WHERE conversationId IN (
+  SELECT id FROM conversation
+  WHERE tenantId = ?
+);
+
+deleteAllConversationsByTenant:
+DELETE FROM conversation
+WHERE tenantId = ?;

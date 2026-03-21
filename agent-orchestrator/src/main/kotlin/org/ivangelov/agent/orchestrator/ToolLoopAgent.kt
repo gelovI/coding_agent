@@ -3,6 +3,7 @@ package org.ivangelov.agent.orchestrator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import org.ivangelov.agent.core.agent.PlanParser
 import org.ivangelov.agent.core.model.ChatMessage
@@ -40,6 +41,7 @@ class ToolLoopAgentFacade(
     private val tools: ToolRegistry,
     private val memory: MemoryService,
     private val projectId: String? = null,
+    private val projectRoot: String? = null,
     private val maxSteps: Int = 4,
     private val maxToolCallsTotal: Int = 12,
     private val maxToolOutputChars: Int = 20_000,
@@ -61,6 +63,66 @@ class ToolLoopAgentFacade(
         )
 
     override fun send(userText: String): Flow<AgentEvent> = flow {
+        fun extractPathFromText(text: String): String? {
+            val windowsFileRegex = Regex(
+                """[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]+\.(kt|java|xml|json|gradle|kts)""",
+                RegexOption.IGNORE_CASE
+            )
+
+            val quotedRegex = Regex(""""([^"]+)"""")
+
+            val quoted = quotedRegex.find(text)?.groupValues?.getOrNull(1)
+            if (!quoted.isNullOrBlank()) {
+                val q = quoted.trim()
+                if (q.contains("\\") || q.contains("/")) return q
+            }
+
+            return windowsFileRegex.find(text)?.value
+        }
+
+        fun toRelativeProjectPath(rawPath: String, projectRoot: String): String {
+            val normalizedPath = rawPath.replace("\\", "/").trim()
+            val normalizedRoot = projectRoot.replace("\\", "/").trim().trimEnd('/')
+
+            if (normalizedRoot.isNotBlank() && normalizedPath.startsWith(normalizedRoot)) {
+                return normalizedPath.removePrefix("$normalizedRoot/").ifBlank { "." }
+            }
+
+            val srcIndex = normalizedPath.indexOf("/src/")
+            if (srcIndex >= 0) {
+                return normalizedPath.substring(srcIndex + 1)
+            }
+
+            return normalizedPath.substringAfterLast("/").ifBlank { "." }
+        }
+
+        fun buildExplicitToolArgs(toolName: String, text: String, projectRoot: String): JsonObject {
+            return when (toolName) {
+                "read_file" -> {
+                    val rawPath = extractPathFromText(text)
+                    if (rawPath == null) {
+                        buildJsonObject { }
+                    } else {
+                        buildJsonObject {
+                            put("path", JsonPrimitive(toRelativeProjectPath(rawPath, projectRoot)))
+                        }
+                    }
+                }
+
+                "list_dir" -> {
+                    val rawPath = extractPathFromText(text)
+                    buildJsonObject {
+                        put(
+                            "path",
+                            JsonPrimitive(rawPath?.let { toRelativeProjectPath(it, projectRoot) } ?: ".")
+                        )
+                    }
+                }
+
+                else -> buildJsonObject { }
+            }
+        }
+
         val sanitizedUserText = inputSanitizer.sanitize(userText)
         val modeDecision = modeResolver.resolve(userText)
 
@@ -89,6 +151,58 @@ class ToolLoopAgentFacade(
             text = sanitizedUserText
         )
 
+         //Chat-Mode
+        if (modeDecision.mode == AgentMode.CHAT) {
+            println("AGENT_STATE_ENTER: CHAT_FLOW")
+
+            currentState = AgentState.BUILD_PROMPT
+            println("AGENT_STATE: -> BUILD_PROMPT")
+
+            val ctx = ContextPack(
+                pinned = emptyList(),
+                retrieved = emptyList(),
+                recentSummary = null
+            )
+
+            val messages = promptBuilder.buildForKnowledge(
+                listOf(ChatMessage(role = Role.USER, content = sanitizedUserText))
+            )
+            currentState = AgentState.CALL_LLM
+            println("AGENT_STATE: -> CALL_LLM")
+
+            val resp = runCatching {
+                llm.complete(messages, ctx, org.ivangelov.agent.core.ports.LlmResponseFormat.TEXT)
+            }.getOrElse { e ->
+                println("LLM_COMPLETE_EXCEPTION=${e::class.qualifiedName}: ${e.message}")
+                e.printStackTrace()
+
+                val msg = "LLM_ERROR: ${e::class.simpleName}: ${e.message}"
+                repo.appendMessage(conversationId, Role.ASSISTANT, msg)
+                currentState = AgentState.FAILED
+                emit(AgentEvent.AssistantMessage(msg))
+                emit(AgentEvent.Completed)
+                return@flow
+            }
+
+            currentState = AgentState.PARSE_RESPONSE
+            println("AGENT_STATE: -> PARSE_RESPONSE")
+
+            val answerRaw = resp.content?.trim().takeUnless { it.isNullOrBlank() }
+                ?: resp.thinking?.trim().takeUnless { it.isNullOrBlank() }
+                ?: "Ich konnte keine Antwort generieren."
+
+            val answer = responseInterpreter.toDisplayText(answerRaw)
+
+            currentState = AgentState.FINALIZE
+            println("AGENT_STATE: -> FINALIZE")
+
+            repo.appendMessage(conversationId, Role.ASSISTANT, answer)
+            currentState = AgentState.COMPLETE
+            println("AGENT_STATE: -> COMPLETE")
+            emit(AgentEvent.AssistantMessage(answer))
+            emit(AgentEvent.Completed)
+            return@flow
+        }
         // Deterministic path: User verlangt explizit ein Tool
         if (modeDecision.mode == AgentMode.EXPLICIT_TOOL) {
             println("AGENT_STATE_ENTER: EXPLICIT_TOOL_FLOW")
@@ -96,8 +210,30 @@ class ToolLoopAgentFacade(
             currentState = AgentState.EXECUTE_TOOLS
             println("AGENT_STATE: -> EXECUTE_TOOLS")
 
-            val explicitTool = requireNotNull(modeDecision.explicitToolName)
-            val args = ToolArgsNormalizer.normalize(explicitTool, buildJsonObject { })
+            val explicitTool = modeDecision.explicitToolName
+            if (explicitTool.isNullOrBlank()) {
+                val msg =
+                    "Ungültige Modusentscheidung: EXPLICIT_TOOL ohne explicitToolName. decision=$modeDecision"
+                println("ERROR: $msg")
+                currentState = AgentState.FAILED
+                emit(AgentEvent.AssistantMessage(msg))
+                emit(AgentEvent.Completed)
+                return@flow
+            }
+
+            val extractedArgs = buildExplicitToolArgs(
+                explicitTool,
+                sanitizedUserText,
+                projectRoot.orEmpty()
+            )
+            println("DEBUG_ARGS_AFTER_BUILD")
+            println(extractedArgs)
+            //val args = ToolArgsNormalizer.normalize(explicitTool, extractedArgs)
+            val args = extractedArgs
+
+            println("DEBUG_EXPLICIT_TOOL")
+            println("tool=$explicitTool")
+            println("args=$args")
 
             when (val result = executeOneTool(explicitTool, args)) {
                 is AgentResult.Success -> {
@@ -119,10 +255,18 @@ class ToolLoopAgentFacade(
                             "Tool ${error.toolName} fehlgeschlagen: ${error.message}"
 
                         is AgentError.ToolValidationFailure -> {
-                            if (error.toolName == "write_file") {
-                                "[write_file]\nINVALID_TOOL_ARGS: ${error.message}\nwrite_file requires:\n- path: relative file path inside the project\n- content: full file content string\nReturn corrected JSON only."
-                            } else {
-                                "[${error.toolName}]\nINVALID_TOOL_ARGS: ${error.message}"
+                            when (error.toolName) {
+                                "read_file" ->
+                                    "[read_file]\nINVALID_TOOL_ARGS: ${error.message}\nread_file requires:\n- path: relativer Dateipfad innerhalb des Projekts\nBeispiel:\n{\"path\":\"src/main/kotlin/App.kt\"}"
+
+                                "list_dir" ->
+                                    "[list_dir]\nINVALID_TOOL_ARGS: ${error.message}\nlist_dir requires:\n- path: relativer Verzeichnispfad innerhalb des Projekts\nBeispiel:\n{\"path\":\".\"}"
+
+                                "write_file" ->
+                                    "[write_file]\nINVALID_TOOL_ARGS: ${error.message}\nwrite_file requires:\n- path: relative file path inside the project\n- content: full file content string\nReturn corrected JSON only."
+
+                                else ->
+                                    "[${error.toolName}]\nINVALID_TOOL_ARGS: ${error.message}"
                             }
                         }
 
@@ -303,7 +447,6 @@ class ToolLoopAgentFacade(
 
             val messages = promptBuilder.buildForToolLoop(history(), tools)
 
-
             val ctx = ContextPack(
                 pinned = emptyList(),
                 retrieved = retrieved,
@@ -425,7 +568,6 @@ class ToolLoopAgentFacade(
                 }
             }
 
-            // 2) Final answer
             if (validatedPlan.toolCalls.isEmpty()) {
                 currentState = AgentState.FINALIZE
                 println("AGENT_STATE: -> FINALIZE")
@@ -448,7 +590,9 @@ class ToolLoopAgentFacade(
                 return@flow
             }
 
-            // 3) Execute tool calls
+            var mutatingToolExecutedSuccessfully = false
+            var toolFailedThisStep = false
+
             for (tc in validatedPlan.toolCalls) {
                 println("DEBUG_TOOL_CALL_FROM_MODEL")
                 println("name=${tc.name}")
@@ -464,17 +608,34 @@ class ToolLoopAgentFacade(
                 }
 
                 val executedSuccessfully = execOnce(tc.name, tc.args)
-                if (executedSuccessfully) {
-                    toolCallsExecutedThisStep++
+                if (!executedSuccessfully) {
+                    toolFailedThisStep = true
+                    println("AGENT_STATE: -> REPLAN (tool failed)")
+                    break
+                }
+
+                toolCallsExecutedThisStep++
+
+                if (isMutatingTool(tc.name)) {
+                    mutatingToolExecutedSuccessfully = true
                 }
             }
 
-            if (toolCallsExecutedThisStep > 0) {
-                println("AGENT_STATE: -> FINALIZE (tool execution done)")
+            if (toolFailedThisStep) {
+                continue
+            }
+
+            if (mutatingToolExecutedSuccessfully) {
+                println("AGENT_STATE: -> FINALIZE (mutating tool execution done)")
                 currentState = AgentState.FINALIZE
 
                 emit(AgentEvent.Completed)
                 return@flow
+            }
+
+            if (toolCallsExecutedThisStep > 0) {
+                println("AGENT_LOOP: read-only tools executed, continuing to next planning step")
+                continue
             }
 
             val msg = "Es wurden keine neuen gültigen Tool-Schritte ausgeführt."
@@ -598,4 +759,13 @@ class ToolLoopAgentFacade(
             }
         }
     }
+}
+
+private fun isMutatingTool(toolName: String): Boolean {
+    return toolName in setOf(
+        "write_file",
+        "write_files",
+        "append_to_file",
+        "replace_in_file"
+    )
 }

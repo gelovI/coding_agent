@@ -198,4 +198,77 @@ class QdrantMemoryStore(
         }.body()
         return resp.result.count
     }
+
+    suspend fun deleteByFilter(filter: QdrantFilter): Boolean {
+        val reqJson = buildJsonObject {
+            put("filter", Json.encodeToJsonElement(filter))
+        }
+
+        val resp = http.post("$baseUrl/collections/$collection/points/delete?wait=true") {
+            contentType(ContentType.Application.Json)
+            setBody(reqJson)
+        }
+
+        val body = resp.bodyAsText()
+        println("QDRANT_DELETE_STATUS=${resp.status}")
+        println("QDRANT_DELETE_BODY=$body")
+
+        return resp.status.value in 200..299
+    }
+
+    @Override
+    override suspend fun deleteConversationMemory(
+        tenantId: String,
+        conversationId: String
+    ): Boolean {
+        val filter = QdrantFilter(
+            must = listOf(
+                QdrantCondition(
+                    key = "tenantId",
+                    match = QdrantMatch(JsonPrimitive(tenantId))
+                ),
+                QdrantCondition(
+                    key = "conversationId",
+                    match = QdrantMatch(JsonPrimitive(conversationId))
+                )
+            )
+        )
+
+        return deleteByFilter(filter)
+    }
+
+    override suspend fun deleteProjectMemory(
+        tenantId: String,
+        projectId: String
+    ): Boolean {
+        val filter = QdrantFilter(
+            must = listOf(
+                QdrantCondition(
+                    key = "tenantId",
+                    match = QdrantMatch(JsonPrimitive(tenantId))
+                ),
+                QdrantCondition(
+                    key = "projectId",
+                    match = QdrantMatch(JsonPrimitive(projectId))
+                )
+            )
+        )
+
+        return deleteByFilter(filter)
+    }
+
+    override suspend fun deleteTenantMemory(
+        tenantId: String
+    ): Boolean {
+        val filter = QdrantFilter(
+            must = listOf(
+                QdrantCondition(
+                    key = "tenantId",
+                    match = QdrantMatch(JsonPrimitive(tenantId))
+                )
+            )
+        )
+
+        return deleteByFilter(filter)
+    }
 }

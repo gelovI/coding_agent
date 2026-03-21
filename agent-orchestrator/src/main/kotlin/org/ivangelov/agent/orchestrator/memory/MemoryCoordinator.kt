@@ -37,4 +37,18 @@ interface MemoryCoordinator {
         query: String,
         topK: Int = 8
     ): List<ChatMessage>
+
+    suspend fun clearConversationMemory(
+        tenantId: String,
+        conversationId: String
+    ): Boolean
+
+    suspend fun clearProjectMemory(
+        tenantId: String,
+        projectId: String
+    ): Boolean
+
+    suspend fun clearTenantMemory(
+        tenantId: String
+    ): Boolean
 }

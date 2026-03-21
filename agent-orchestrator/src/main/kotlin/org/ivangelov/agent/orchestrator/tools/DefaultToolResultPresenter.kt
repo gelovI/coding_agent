@@ -26,6 +26,14 @@ class DefaultToolResultPresenter : ToolResultPresenter {
             }
             "index_project" -> "✅ Projekt wurde indexiert. Du kannst jetzt Architektur-/Code-Fragen stellen."
             "analyze_architecture" -> "✅ Relevante Code-Stellen zur Architektur wurden geladen."
+            "append_to_file" -> {
+                val path = arg("path") ?: "Datei"
+                "✅ Inhalt wurde an „$path“ angehängt."
+            }
+            "replace_in_file" -> {
+                val path = arg("path") ?: "Datei"
+                "✅ Inhalt in „$path“ wurde gezielt ersetzt."
+            }
             else -> null
         }
     }

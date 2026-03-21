@@ -20,6 +20,18 @@ class DefaultToolNameResolver : ToolNameResolver {
             "tool.file.write",
             "create_file" -> "write_file"
 
+            "write_files",
+            "repo_browser.write_files",
+            "tool.file.write_many" -> "write_files"
+
+            "append_to_file",
+            "repo_browser.append_to_file",
+            "tool.file.append" -> "append_to_file"
+
+            "replace_in_file",
+            "repo_browser.replace_in_file",
+            "tool.file.replace" -> "replace_in_file"
+
             "index_project",
             "indexproject",
             "project.index",

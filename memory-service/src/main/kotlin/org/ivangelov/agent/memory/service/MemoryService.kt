@@ -129,4 +129,24 @@ class MemoryService(
         val key = "tenant=$tenantId|scope=${scope.name}|pid=${projectId ?: "-"}|type=${type.name}|text=${text.lowercase()}"
         return UUID.nameUUIDFromBytes(key.toByteArray(StandardCharsets.UTF_8)).toString()
     }
+
+    suspend fun deleteConversationMemory(
+        tenantId: String,
+        conversationId: String
+    ): Boolean {
+        return store.deleteConversationMemory(tenantId, conversationId)
+    }
+
+    suspend fun deleteProjectMemory(
+        tenantId: String,
+        projectId: String
+    ): Boolean {
+        return store.deleteProjectMemory(tenantId, projectId)
+    }
+
+    suspend fun deleteTenantMemory(
+        tenantId: String
+    ): Boolean {
+        return store.deleteTenantMemory(tenantId)
+    }
 }

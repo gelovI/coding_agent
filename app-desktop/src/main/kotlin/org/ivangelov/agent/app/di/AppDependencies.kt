@@ -7,6 +7,8 @@ import org.ivangelov.agent.app.util.StdoutLogger
 import org.ivangelov.agent.core.infrastructure.HttpClients
 import org.ivangelov.agent.db.DbFactory
 import org.ivangelov.agent.memory.service.MemoryService
+import org.ivangelov.agent.orchestrator.memory.DefaultMemoryCoordinator
+import org.ivangelov.agent.orchestrator.memory.MemoryCoordinator
 
 class AppDependencies private constructor(
     val logger: Logger,
@@ -17,6 +19,7 @@ class AppDependencies private constructor(
     val projectRepo: org.ivangelov.agent.db.ProjectRepository,
 
     val rootResolver: ProjectRootResolver,
+    val memoryCoordinator: MemoryCoordinator,
 
     val createAgent: (
         tenantId: String,
@@ -47,6 +50,7 @@ class AppDependencies private constructor(
             val embed = org.ivangelov.agent.llm.ollama.OllamaEmbedClient(http = http)
             val qdrant = org.ivangelov.agent.memory.qdrant.QdrantMemoryStore(http = http)
             val memory = MemoryService(embed = embed, store = qdrant)
+            val memoryCoordinator = DefaultMemoryCoordinator(memory)
 
             // ToolRegistry factory per root
             fun toolRegistryFor(
@@ -62,6 +66,8 @@ class AppDependencies private constructor(
                         org.ivangelov.agent.tools.fs.ReadFileTool(root),
                         org.ivangelov.agent.tools.fs.WriteFileTool(root),
                         org.ivangelov.agent.tools.fs.WriteFilesTool(root),
+                        org.ivangelov.agent.tools.fs.AppendToFileTool(root),
+                        org.ivangelov.agent.tools.fs.ReplaceInFileTool(root),
 
                         // Project indexing into vector memory
                         org.ivangelov.agent.tools.code.IndexProjectTool(
@@ -111,6 +117,7 @@ class AppDependencies private constructor(
                 chatRepo = chatRepo,
                 projectRepo = projectRepo,
                 rootResolver = rootResolver,
+                memoryCoordinator = memoryCoordinator,
                 createAgent = createAgent
             )
         }

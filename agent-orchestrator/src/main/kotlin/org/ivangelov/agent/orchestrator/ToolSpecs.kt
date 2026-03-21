@@ -70,11 +70,17 @@ object ToolSpecs {
                     name = "content",
                     description = "Full file content as a string.",
                     required = true
+                ),
+                ToolArgSpec(
+                    name = "overwrite",
+                    description = "Optional boolean. Must be true to replace an existing file completely.",
+                    required = false
                 )
             ),
             exampleArgs = buildJsonObject {
                 put("path", "domain/User.kt")
                 put("content", "data class User(val id: String)")
+                put("overwrite", true)
             }
         ),
 
@@ -151,6 +157,54 @@ object ToolSpecs {
                 put("query", "Wie ist die Architektur aufgebaut?")
                 put("top_k", 8)
             }
+        ),
+
+        ToolSpec(
+            name = "append_to_file",
+            description = "Append content to the end of an existing file. Fails if the file does not exist.",
+            args = listOf(
+                ToolArgSpec(
+                    name = "path",
+                    description = "Relative file path inside the project. The file must already exist.",
+                    required = true
+                ),
+                ToolArgSpec(
+                    name = "content",
+                    description = "Concrete text to append to the end of the file.",
+                    required = true
+                )
+            ),
+            exampleArgs = buildJsonObject {
+                put("path", "domain/User.kt")
+                put("content", "\n// Validation is handled before saving the user.\n")
+            }
+        ),
+
+        ToolSpec(
+            name = "replace_in_file",
+            description = "Replace one exact existing text fragment in an existing file. The search text must match exactly once.",
+            args = listOf(
+                ToolArgSpec(
+                    name = "path",
+                    description = "Relative file path inside the project.",
+                    required = true
+                ),
+                ToolArgSpec(
+                    name = "search",
+                    description = "Exact text fragment to find. Must match exactly once.",
+                    required = true
+                ),
+                ToolArgSpec(
+                    name = "replace",
+                    description = "Replacement text.",
+                    required = true
+                )
+            ),
+            exampleArgs = buildJsonObject {
+                put("path", "domain/User.kt")
+                put("search", "class User")
+                put("replace", "// User entity\nclass User")
+            }
         )
     ).associateBy { it.name }
 
@@ -210,6 +264,14 @@ class ToolValidator(
             if (p.isBlank()) return "Invalid path: blank"
             if (p.startsWith("/") || p.contains(":\\") || p.contains(":/")) return "Invalid path: absolute not allowed ($p)"
             if (p.contains("..")) return "Invalid path: traversal not allowed ($p)"
+        }
+
+        args["content"]?.jsonPrimitive?.contentOrNull?.let { c ->
+            if (c.isBlank()) return "Invalid content: blank"
+        }
+
+        args["search"]?.jsonPrimitive?.contentOrNull?.let { s ->
+            if (s.isEmpty()) return "Invalid search: empty"
         }
 
         return null

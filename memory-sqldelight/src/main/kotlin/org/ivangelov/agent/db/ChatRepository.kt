@@ -62,4 +62,31 @@ class ChatRepository(
             )
             .executeAsOneOrNull()
     }
+
+    fun clearMessages(conversationId: String) {
+        db.agentDbQueries.deleteMessagesByConversation(conversationId)
+        val now = clock.now().toEpochMilliseconds()
+        db.agentDbQueries.touchConversation(updatedAt = now, id = conversationId)
+    }
+
+    fun deleteConversation(conversationId: String) {
+        db.agentDbQueries.deleteMessagesByConversation(conversationId)
+        db.agentDbQueries.deleteConversationById(conversationId)
+    }
+
+    fun deleteProjectChats(tenantId: String, projectId: String) {
+        db.agentDbQueries.deleteMessagesByProject(
+            tenantId = tenantId,
+            projectId = projectId
+        )
+        db.agentDbQueries.deleteConversationsByProject(
+            tenantId = tenantId,
+            projectId = projectId
+        )
+    }
+
+    fun deleteAllTenantChats(tenantId: String) {
+        db.agentDbQueries.deleteAllMessagesByTenant(tenantId)
+        db.agentDbQueries.deleteAllConversationsByTenant(tenantId)
+    }
 }

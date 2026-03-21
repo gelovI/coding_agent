@@ -8,12 +8,33 @@ class DefaultAgentStateMachine : AgentStateMachine {
 
     override fun route(mode: AgentMode): AgentTransition {
         return when (mode) {
-            AgentMode.KNOWLEDGE ->
-                AgentTransition(AgentState.ROUTE, AgentState.RETRIEVE_MEMORY, "knowledge route")
+            AgentMode.EXPLICIT_TOOL ->
+                AgentTransition(
+                    from = AgentState.ROUTE,
+                    to = AgentState.EXECUTE_TOOLS,
+                    reason = "explicit tool route"
+                )
 
-            AgentMode.EXPLICIT_TOOL,
+            AgentMode.KNOWLEDGE ->
+                AgentTransition(
+                    from = AgentState.ROUTE,
+                    to = AgentState.RETRIEVE_MEMORY,
+                    reason = "knowledge route"
+                )
+
+            AgentMode.TOOL_LOOP ->
+                AgentTransition(
+                    from = AgentState.ROUTE,
+                    to = AgentState.RETRIEVE_MEMORY,
+                    reason = "tool/default route"
+                )
+
             AgentMode.CHAT ->
-                AgentTransition(AgentState.ROUTE, AgentState.RETRIEVE_MEMORY, "tool/default route")
+                AgentTransition(
+                    from = AgentState.ROUTE,
+                    to = AgentState.RETRIEVE_MEMORY,
+                    reason = "chat route"
+                )
         }
     }
 

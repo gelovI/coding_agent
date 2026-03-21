@@ -29,6 +29,13 @@ class ProjectRootResolver(
         // IMPORTANT: convert via String to okio.Path (NOT java.nio.file.Path)
         val resolved: Path = f.canonicalPath.toPath()
 
+        val appDir = File(f, "app")
+        if (appDir.exists() && appDir.isDirectory) {
+            val appPath = appDir.canonicalPath.toPath()
+            logger.info("Detected Android app module for '${projectName ?: "unknown"}': $appPath")
+            return appPath
+        }
+
         if (resolved != defaultRoot) {
             logger.info("Using project root for '${projectName ?: "unknown"}': $resolved")
         }
