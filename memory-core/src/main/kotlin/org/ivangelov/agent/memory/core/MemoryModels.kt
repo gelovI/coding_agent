@@ -35,5 +35,6 @@ data class MemoryHit(
     val scope: MemoryScope,
     val projectId: String?,
     val turnId: String,
-    val ts: Long
+    val ts: Long,
+    val type: MemoryType
 )

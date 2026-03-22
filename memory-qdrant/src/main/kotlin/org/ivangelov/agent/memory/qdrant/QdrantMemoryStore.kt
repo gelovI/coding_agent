@@ -150,6 +150,7 @@ class QdrantMemoryStore(
             val pid = payload["projectId"]?.jsonPrimitive?.contentOrNull
             val turnId = payload["turnId"]?.jsonPrimitive?.contentOrNull ?: ""
             val ts = payload["ts"]?.jsonPrimitive?.longOrNull ?: 0L
+            val typeStr = payload["type"]?.jsonPrimitive?.contentOrNull ?: "TURN"
 
             MemoryHit(
                 id = id.trim('"'),
@@ -158,7 +159,8 @@ class QdrantMemoryStore(
                 scope = runCatching { MemoryScope.valueOf(scopeStr) }.getOrDefault(MemoryScope.GLOBAL),
                 projectId = pid,
                 turnId = turnId,
-                ts = ts
+                ts = ts,
+                type = runCatching { MemoryType.valueOf(typeStr) }.getOrDefault(MemoryType.TURN)
             )
         }.sortedByDescending { it.score }
     }

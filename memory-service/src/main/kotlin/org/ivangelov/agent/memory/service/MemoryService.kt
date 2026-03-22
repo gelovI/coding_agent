@@ -29,17 +29,53 @@ class MemoryService(
             scope = scope,
             projectId = projectId,
             vector = qVec,
-            topK = topK
-        ).sortedByDescending { it.score }
-
-        println("MEM_SEARCH hits=${hits.size} topScores=" +
-                hits.take(5).joinToString { "%.3f".format(it.score) }
+            topK = topK * 3
         )
 
-        // Normal: filter by minScore
-        val finalHits = hits
-            .filter { it.score >= minScore }
-            .take(topK)
+        val architectureLike = query.lowercase().let {
+            "architektur" in it ||
+                    "architecture" in it ||
+                    "struktur" in it ||
+                    "aufbau" in it ||
+                    "komponenten" in it ||
+                    "schichten" in it ||
+                    "datenfluss" in it ||
+                    "überblick" in it ||
+                    "ueberblick" in it
+        }
+
+        val rankedHits = if (architectureLike) {
+            val projectInfoHits = hits
+                .filter { it.type == MemoryType.PROJECT_INFO }
+                .sortedByDescending { it.score }
+
+            if (projectInfoHits.isNotEmpty()) {
+                projectInfoHits
+            } else {
+                hits.sortedByDescending { it.score }
+            }
+        } else {
+            hits.sortedByDescending { it.score }
+        }
+
+        println(
+            "MEM_SEARCH hits=${hits.size} topScores=" +
+                    rankedHits.take(5).joinToString { "${it.type}:${"%.3f".format(it.score)}" }
+        )
+
+        val finalHits = if (architectureLike) {
+            rankedHits
+                .filter { it.type == MemoryType.PROJECT_INFO || it.score >= minScore }
+                .take(topK)
+        } else {
+            rankedHits
+                .filter { it.score >= minScore }
+                .take(topK)
+        }
+
+        finalHits.forEachIndexed { i, hit ->
+            println("MEM_FINAL_HIT_$i type=${hit.type} score=${"%.3f".format(hit.score)} text=${hit.text.take(140)}")
+        }
 
         return finalHits.map {
             RetrievedMemory(
@@ -99,8 +135,16 @@ class MemoryService(
             val normalized = policy.normalize(text)
             val embedding = embed.embed(normalized)
 
+            val id = stableId(
+                tenantId = tenantId,
+                scope = scope,
+                projectId = projectId,
+                type = type,
+                text = normalized
+            )
+
             val item = MemoryItem(
-                id = UUID.randomUUID().toString(),
+                id = id,
                 tenantId = tenantId,
                 scope = scope,
                 projectId = projectId,

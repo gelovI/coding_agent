@@ -77,7 +77,10 @@ fun MessageBubble(role: String, text: String) {
                     style = MaterialTheme.typography.labelMedium
                 )
                 Spacer(Modifier.height(6.dp))
-                RenderRichText(text)
+
+                SelectionContainer {
+                    RenderRichText(text)
+                }
             }
         }
     }
@@ -108,10 +111,6 @@ private sealed class RichPart {
 }
 
 private fun splitByCodeFences(input: String): List<RichPart> {
-    // Matches:
-    // ```kotlin
-    // code...
-    // ```
     val regex = Regex("```([a-zA-Z0-9_+-]*)\\n([\\s\\S]*?)```")
     val out = mutableListOf<RichPart>()
 

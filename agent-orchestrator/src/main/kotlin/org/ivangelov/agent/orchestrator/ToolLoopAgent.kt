@@ -165,8 +165,9 @@ class ToolLoopAgentFacade(
             )
 
             val messages = promptBuilder.buildForKnowledge(
-                listOf(ChatMessage(role = Role.USER, content = sanitizedUserText))
+                limitedHistory(maxMessages = 4, maxCharsPerMessage = 1500)
             )
+
             currentState = AgentState.CALL_LLM
             println("AGENT_STATE: -> CALL_LLM")
 
@@ -319,20 +320,37 @@ class ToolLoopAgentFacade(
                 return@flow
             }
 
+            val uniqueRetrieved = retrieved
+                .distinctBy { it.content.substringBefore(" --- ").trim() }
+                .take(3)
+
             val ctx = ContextPack(
                 pinned = emptyList(),
-                retrieved = retrieved.map { it.copy(content = it.content.take(350)) },
+                retrieved = uniqueRetrieved.map { it.copy(content = it.content.take(180)) },
                 recentSummary = null
             )
 
-            val messages = promptBuilder.buildForKnowledge(history())
+            val messages = listOf(
+                ChatMessage(
+                    Role.SYSTEM,
+                    "Nutze nur den bereitgestellten Projektkontext und beantworte die Frage direkt konkret. " +
+                            "Keine allgemeinen Checklisten. Keine Aufforderung zur Indexierung."
+                ),
+                ChatMessage(Role.USER, sanitizedUserText)
+            )
 
             currentState = AgentState.CALL_LLM
             println("AGENT_STATE: -> CALL_LLM")
 
+            val startedAt = System.currentTimeMillis()
+
             val resp = runCatching {
                 llm.complete(messages, ctx, org.ivangelov.agent.core.ports.LlmResponseFormat.TEXT)
             }.getOrElse { e ->
+                println("KNOWLEDGE_LLM_DURATION_MS=${System.currentTimeMillis() - startedAt}")
+                println("LLM_COMPLETE_EXCEPTION=${e::class.qualifiedName}: ${e.message}")
+                e.printStackTrace()
+
                 val msg = "LLM_ERROR: ${e::class.simpleName}: ${e.message}"
                 repo.appendMessage(conversationId, Role.ASSISTANT, msg)
                 currentState = AgentState.FAILED
@@ -340,6 +358,8 @@ class ToolLoopAgentFacade(
                 emit(AgentEvent.Completed)
                 return@flow
             }
+
+            println("KNOWLEDGE_LLM_DURATION_MS=${System.currentTimeMillis() - startedAt}")
 
             currentState = AgentState.PARSE_RESPONSE
             println("AGENT_STATE: -> PARSE_RESPONSE")
@@ -440,12 +460,21 @@ class ToolLoopAgentFacade(
             currentState = AgentState.RETRIEVE_MEMORY
             println("AGENT_STATE: -> RETRIEVE_MEMORY")
 
-            val retrieved = emptyList<ChatMessage>()
+            val retrieved = memoryCoordinator.retrieveForToolLoop(
+                tenantId = tenantId,
+                conversationId = conversationId,
+                projectId = projectId,
+                query = sanitizedUserText,
+                topK = 4
+            )
 
             currentState = AgentState.BUILD_PROMPT
             println("AGENT_STATE: -> BUILD_PROMPT")
 
-            val messages = promptBuilder.buildForToolLoop(history(), tools)
+            val messages = promptBuilder.buildForToolLoop(
+                limitedHistory(maxMessages = 4, maxCharsPerMessage = 1500),
+                tools
+            )
 
             val ctx = ContextPack(
                 pinned = emptyList(),
@@ -758,6 +787,24 @@ class ToolLoopAgentFacade(
                 AgentResult.Failure(result.error)
             }
         }
+    }
+
+    private fun limitedHistory(
+        maxMessages: Int,
+        maxCharsPerMessage: Int = 2000
+    ): List<ChatMessage> {
+        return history()
+            .takeLast(maxMessages)
+            .map { msg ->
+                val trimmedContent =
+                    if (msg.content.length > maxCharsPerMessage) {
+                        msg.content.take(maxCharsPerMessage)
+                    } else {
+                        msg.content
+                    }
+
+                ChatMessage(msg.role, trimmedContent)
+            }
     }
 }
 
