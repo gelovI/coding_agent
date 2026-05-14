@@ -44,6 +44,7 @@ import org.ivangelov.agent.orchestrator.edit.EditStrategySelector
 import org.ivangelov.agent.orchestrator.edit.KotlinBlockExtractor
 import org.ivangelov.agent.orchestrator.edit.PatchBuilder
 import org.ivangelov.agent.orchestrator.edit.TargetBlock
+import java.util.UUID
 
 class ToolLoopAgentFacade(
     private val repo: ChatRepository,
@@ -86,6 +87,8 @@ class ToolLoopAgentFacade(
     private var smartEditPath: String? = null
 
     private var scaffoldingPlanRejectedCount: Int = 0
+    private var pendingMutationApproval: PendingMutationApproval? = null
+    private var approvedMutationRequestId: String? = null
 
     private enum class RequestMode {
         ANALYSIS,
@@ -123,7 +126,17 @@ class ToolLoopAgentFacade(
     private data class ExecutionCycleResult(
         val mutated: Boolean,
         val readSomething: Boolean,
-        val shouldContinue: Boolean = true
+        val shouldContinue: Boolean = true,
+        val approvalRequested: Boolean = false
+    )
+
+    private data class PendingMutationApproval(
+        val requestId: String,
+        val plan: ValidatedAgentPlan,
+        val state: ToolLoopSessionState,
+        val userText: String,
+        val retrieved: List<ChatMessage>,
+        val successMessage: String
     )
 
     private data class ScaffoldingBlueprint(
@@ -154,6 +167,8 @@ class ToolLoopAgentFacade(
         smartEditFailed = false
         smartEditPath = null
         scaffoldingPlanRejectedCount = 0
+        pendingMutationApproval = null
+        approvedMutationRequestId = null
     }
 
     private fun detectRequestMode(userText: String): RequestMode {
@@ -180,6 +195,49 @@ class ToolLoopAgentFacade(
             RequestMode.MODIFICATION -> runModificationLoop(sanitizedUserText, emitEvent)
             RequestMode.ANALYSIS -> runAnalysisLoop(sanitizedUserText, emitEvent)
         }
+    }
+
+    fun approvePendingMutation(requestId: String): Flow<AgentEvent> = flow {
+        val emitEvent: suspend (AgentEvent) -> Unit = { event -> emit(event) }
+        val pending = pendingMutationApproval
+
+        if (pending == null || pending.requestId != requestId) {
+            failWithMessage("Keine ausstehende Schreibbestätigung gefunden.", emitEvent)
+            return@flow
+        }
+
+        pendingMutationApproval = null
+        approvedMutationRequestId = requestId
+
+        try {
+            val cycle = executeValidatedPlan(
+                plan = pending.plan,
+                state = pending.state,
+                userText = pending.userText,
+                retrieved = pending.retrieved,
+                emit = emitEvent,
+                approvalSuccessMessage = pending.successMessage
+            )
+
+            if (cycle.mutated) {
+                finalizeAssistantReply(pending.successMessage, emitEvent)
+            } else {
+                failWithMessage("Bestätigte Änderung konnte nicht ausgeführt werden.", emitEvent)
+            }
+        } finally {
+            approvedMutationRequestId = null
+        }
+    }
+
+    fun rejectPendingMutation(requestId: String): Flow<AgentEvent> = flow {
+        val emitEvent: suspend (AgentEvent) -> Unit = { event -> emit(event) }
+        val pending = pendingMutationApproval
+
+        if (pending != null && pending.requestId == requestId) {
+            pendingMutationApproval = null
+        }
+
+        failWithMessage("Schreibvorgang abgebrochen.", emitEvent)
     }
 
     private suspend fun storeIncomingUserTurn(
@@ -304,8 +362,11 @@ class ToolLoopAgentFacade(
             state = state,
             userText = sanitizedUserText,
             retrieved = retrieved,
-            emit = emit
+            emit = emit,
+            approvalSuccessMessage = "Architektur/Projektstruktur wurde erstellt."
         )
+
+        if (cycle.approvalRequested) return
 
         if (cycle.mutated) {
             finalizeAssistantReply("Architektur/Projektstruktur wurde erstellt.", emit)
@@ -1039,8 +1100,11 @@ class ToolLoopAgentFacade(
                 state = state,
                 userText = sanitizedUserText,
                 retrieved = retrieved,
-                emit = emit
+                emit = emit,
+                approvalSuccessMessage = "Änderungen wurden durchgeführt."
             )
+
+            if (cycle.approvalRequested) return
 
             if (cycle.mutated) {
                 finalizeAssistantReply("Änderungen wurden durchgeführt.", emit)
@@ -1364,13 +1428,71 @@ class ToolLoopAgentFacade(
         )
     }
 
+    private fun buildApprovalRequiredEvent(
+        requestId: String,
+        plan: ValidatedAgentPlan
+    ): AgentEvent.ApprovalRequired {
+        val mutatingCalls = plan.toolCalls.filter { isMutatingTool(it.name) }
+        val totalPaths = mutatingCalls
+            .flatMap { extractAffectedProjectPaths(it.name, it.args) }
+            .distinct()
+            .size
+
+        val summary = buildString {
+            append("Der Agent möchte ")
+            append(mutatingCalls.size)
+            append(if (mutatingCalls.size == 1) " schreibendes Tool" else " schreibende Tools")
+            if (totalPaths > 0) {
+                append(" auf ")
+                append(totalPaths)
+                append(if (totalPaths == 1) " Datei" else " Dateien")
+            }
+            append(" ausführen.")
+        }
+
+        return AgentEvent.ApprovalRequired(
+            requestId = requestId,
+            summary = summary,
+            toolCalls = mutatingCalls.map { call ->
+                org.ivangelov.agent.core.agent.PendingToolCall(
+                    toolName = call.name,
+                    paths = extractAffectedProjectPaths(call.name, call.args),
+                    argsPreview = call.args.redactedForLog(maxChars = 900)
+                )
+            }
+        )
+    }
+
     private suspend fun executeValidatedPlan(
         plan: ValidatedAgentPlan,
         state: ToolLoopSessionState,
         userText: String,
         retrieved: List<ChatMessage>,
-        emit: suspend (AgentEvent) -> Unit
+        emit: suspend (AgentEvent) -> Unit,
+        approvalSuccessMessage: String = "Änderungen wurden durchgeführt."
     ): ExecutionCycleResult {
+        if (plan.toolCalls.any { isMutatingTool(it.name) } && approvedMutationRequestId == null) {
+            val requestId = UUID.randomUUID().toString()
+            pendingMutationApproval = PendingMutationApproval(
+                requestId = requestId,
+                plan = plan,
+                state = state,
+                userText = userText,
+                retrieved = retrieved,
+                successMessage = approvalSuccessMessage
+            )
+
+            emit(buildApprovalRequiredEvent(requestId, plan))
+            emit(AgentEvent.Completed)
+
+            return ExecutionCycleResult(
+                mutated = false,
+                readSomething = false,
+                shouldContinue = false,
+                approvalRequested = true
+            )
+        }
+
         val executedThisStep = mutableSetOf<String>()
         var mutated = false
         var readSomething = false
@@ -1756,24 +1878,27 @@ class ToolLoopAgentFacade(
             replacementBlock = replacement
         )
 
-        return when (val result = executeOneTool("replace_in_file", replaceArgs)) {
-            is AgentResult.Success -> {
-                emit(
-                    AgentEvent.ToolExecuted(
-                        toolName = result.value.toolName,
-                        output = result.value.rawOutput
-                    )
-                )
+        val approvalMsg = "Änderungen in $path wurden durchgeführt."
+        val approvalCycle = executeValidatedPlan(
+            plan = ValidatedAgentPlan(
+                toolCalls = listOf(ValidatedToolCall("replace_in_file", replaceArgs)),
+                reply = ""
+            ),
+            state = ToolLoopSessionState(),
+            userText = userText,
+            retrieved = emptyList(),
+            emit = emit,
+            approvalSuccessMessage = approvalMsg
+        )
 
-                val msg = "Änderungen in $path wurden durchgeführt."
-                repo.appendMessage(conversationId, Role.ASSISTANT, msg)
-                emit(AgentEvent.AssistantMessage(msg))
-                emit(AgentEvent.Completed)
-                true
-            }
+        if (approvalCycle.approvalRequested) return true
+        if (!approvalCycle.mutated) return false
 
-            is AgentResult.Failure -> false
-        }
+        repo.appendMessage(conversationId, Role.ASSISTANT, approvalMsg)
+        emit(AgentEvent.AssistantMessage(approvalMsg))
+        emit(AgentEvent.Completed)
+        return true
+
     }
 
     private suspend fun rewriteMultipleBlocks(
@@ -1847,24 +1972,27 @@ class ToolLoopAgentFacade(
             put("content", JsonPrimitive(rewritten))
         }
 
-        return when (val result = executeOneTool("write_file", args)) {
-            is AgentResult.Success -> {
-                emit(
-                    AgentEvent.ToolExecuted(
-                        toolName = result.value.toolName,
-                        output = result.value.rawOutput
-                    )
-                )
+        val approvalMsg = "Datei $path wurde neu geschrieben."
+        val approvalCycle = executeValidatedPlan(
+            plan = ValidatedAgentPlan(
+                toolCalls = listOf(ValidatedToolCall("write_file", args)),
+                reply = ""
+            ),
+            state = ToolLoopSessionState(),
+            userText = userText,
+            retrieved = emptyList(),
+            emit = emit,
+            approvalSuccessMessage = approvalMsg
+        )
 
-                val msg = "Datei $path wurde neu geschrieben."
-                repo.appendMessage(conversationId, Role.ASSISTANT, msg)
-                emit(AgentEvent.AssistantMessage(msg))
-                emit(AgentEvent.Completed)
-                true
-            }
+        if (approvalCycle.approvalRequested) return true
+        if (!approvalCycle.mutated) return false
 
-            is AgentResult.Failure -> false
-        }
+        repo.appendMessage(conversationId, Role.ASSISTANT, approvalMsg)
+        emit(AgentEvent.AssistantMessage(approvalMsg))
+        emit(AgentEvent.Completed)
+        return true
+
     }
 
     private suspend fun tryForcedReadThenEditSmart(

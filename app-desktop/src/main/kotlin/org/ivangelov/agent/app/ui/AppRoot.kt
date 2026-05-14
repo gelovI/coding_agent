@@ -168,7 +168,7 @@ fun AppRoot(deps: AppDependencies) {
             )
 
             Button(
-                enabled = controller.agent != null && !controller.isSending,
+                enabled = controller.agent != null && !controller.isSending && controller.pendingApproval == null,
                 onClick = { controller.send() }
             ) { Text("Send") }
 
@@ -176,6 +176,42 @@ fun AppRoot(deps: AppDependencies) {
                 enabled = controller.agent != null && !controller.isSending,
                 onClick = { controller.clear() }
             ) { Text("Clear") }
+        }
+
+        controller.pendingApproval?.let { approval ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { },
+                title = { Text("Änderungen bestätigen?") },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.heightIn(max = 320.dp)
+                    ) {
+                        Text(approval.summary)
+
+                        approval.toolCalls.forEach { call ->
+                            val paths = call.paths.joinToString(", ").ifBlank { "ohne konkreten Pfad" }
+                            Text("${call.toolName}: $paths")
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        enabled = !controller.isSending,
+                        onClick = { controller.approvePendingMutation() }
+                    ) {
+                        Text("Anwenden")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        enabled = !controller.isSending,
+                        onClick = { controller.rejectPendingMutation() }
+                    ) {
+                        Text("Ablehnen")
+                    }
+                }
+            )
         }
 
         confirmAction.value?.let { action ->

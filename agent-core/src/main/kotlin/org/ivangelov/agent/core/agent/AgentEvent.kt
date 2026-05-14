@@ -12,6 +12,12 @@ sealed interface AgentEvent {
         val output: String
     ) : AgentEvent
 
+    data class ApprovalRequired(
+        val requestId: String,
+        val summary: String,
+        val toolCalls: List<PendingToolCall>
+    ) : AgentEvent
+
     data class AssistantMessage(
         val text: String
     ) : AgentEvent
@@ -22,3 +28,9 @@ sealed interface AgentEvent {
 
     data object Completed : AgentEvent
 }
+
+data class PendingToolCall(
+    val toolName: String,
+    val paths: List<String>,
+    val argsPreview: String
+)

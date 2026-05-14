@@ -6,12 +6,14 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import okio.Path
 import org.ivangelov.agent.app.di.ProjectRootResolver
 import org.ivangelov.agent.app.util.Logger
-import org.ivangelov.agent.core.model.ChatMessage
 import org.ivangelov.agent.core.agent.AgentEvent
+import org.ivangelov.agent.core.model.ChatMessage
 
 class ChatController(
     private val scope: CoroutineScope,
@@ -57,6 +59,9 @@ class ChatController(
         private set
 
     var isSending: Boolean by mutableStateOf(false)
+        private set
+
+    var pendingApproval: AgentEvent.ApprovalRequired? by mutableStateOf(null)
         private set
 
     var agent: org.ivangelov.agent.orchestrator.ToolLoopAgentFacade? by mutableStateOf(null)
@@ -204,67 +209,13 @@ class ChatController(
         cancelActiveSend("new send")
 
         input = ""
+        pendingApproval = null
         isSending = true
 
         sendJob = scope.launch {
             try {
                 streamingAssistant = ""
-
-                a.send(text).collect { event ->
-                    when (event) {
-                        is AgentEvent.UserMessageStored -> {
-                            history = chatRepo.loadMessages(cid).map {
-                                ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
-                            }
-                        }
-
-                        is AgentEvent.StreamDelta -> {
-                            appendAssistantDelta(event.text)
-                        }
-
-                        is AgentEvent.ToolExecuted -> {
-                            if (streamingAssistant.isNotBlank()) {
-                                appendHistoryMessage(
-                                    ChatMessage(ChatMessage.Role.ASSISTANT, streamingAssistant)
-                                )
-                                streamingAssistant = ""
-                            }
-
-                            val shouldShowToolMessage =
-                                event.toolName !in setOf("read_file", "llm_violation") &&
-                                        !event.output.contains("TOOL_FAILURE:") &&
-                                        !event.output.contains("Empty final plan received") &&
-                                        !event.output.contains("Return ONLY valid JSON")
-
-                            if (shouldShowToolMessage) {
-                                appendHistoryMessage(
-                                    ChatMessage(
-                                        ChatMessage.Role.TOOL,
-                                        "[${event.toolName}]\n${event.output}"
-                                    )
-                                )
-                            }
-                        }
-
-                        is AgentEvent.AssistantMessage -> {
-                            if (streamingAssistant.isNotBlank()) {
-                                streamingAssistant = ""
-                            }
-
-                            appendHistoryMessage(
-                                ChatMessage(ChatMessage.Role.ASSISTANT, event.text)
-                            )
-                        }
-
-                        AgentEvent.Completed -> {
-                            history = chatRepo.loadMessages(cid).map {
-                                ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
-                            }
-                            streamingAssistant = ""
-                            isSending = false
-                        }
-                    }
-                }
+                collectAgentEvents(cid, a.send(text))
             } catch (ce: CancellationException) {
                 logger.info("Send cancelled: ${ce.message ?: "no message"}")
                 throw ce
@@ -274,6 +225,125 @@ class ChatController(
                 streamingAssistant = ""
                 isSending = false
                 sendJob = null
+            }
+        }
+    }
+
+    fun approvePendingMutation() {
+        val a = agent ?: return
+        val cid = conversationId ?: return
+        val approval = pendingApproval ?: return
+
+        cancelActiveSend("approve mutation")
+        pendingApproval = null
+        isSending = true
+
+        sendJob = scope.launch {
+            try {
+                streamingAssistant = ""
+                collectAgentEvents(cid, a.approvePendingMutation(approval.requestId))
+            } catch (ce: CancellationException) {
+                logger.info("Approval cancelled: ${ce.message ?: "no message"}")
+                throw ce
+            } catch (t: Throwable) {
+                logger.error("Approval failed", t)
+            } finally {
+                streamingAssistant = ""
+                isSending = false
+                sendJob = null
+            }
+        }
+    }
+
+    fun rejectPendingMutation() {
+        val a = agent ?: return
+        val cid = conversationId ?: return
+        val approval = pendingApproval ?: return
+
+        cancelActiveSend("reject mutation")
+        pendingApproval = null
+        isSending = true
+
+        sendJob = scope.launch {
+            try {
+                streamingAssistant = ""
+                collectAgentEvents(cid, a.rejectPendingMutation(approval.requestId))
+            } catch (ce: CancellationException) {
+                logger.info("Rejection cancelled: ${ce.message ?: "no message"}")
+                throw ce
+            } catch (t: Throwable) {
+                logger.error("Rejection failed", t)
+            } finally {
+                streamingAssistant = ""
+                isSending = false
+                sendJob = null
+            }
+        }
+    }
+
+    private suspend fun collectAgentEvents(
+        conversationId: String,
+        events: Flow<AgentEvent>
+    ) {
+        events.collect { event ->
+            when (event) {
+                is AgentEvent.UserMessageStored -> {
+                    history = chatRepo.loadMessages(conversationId).map {
+                        ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
+                    }
+                }
+
+                is AgentEvent.StreamDelta -> {
+                    appendAssistantDelta(event.text)
+                }
+
+                is AgentEvent.ToolExecuted -> {
+                    if (streamingAssistant.isNotBlank()) {
+                        appendHistoryMessage(
+                            ChatMessage(ChatMessage.Role.ASSISTANT, streamingAssistant)
+                        )
+                        streamingAssistant = ""
+                    }
+
+                    val shouldShowToolMessage =
+                        event.toolName !in setOf("read_file", "llm_violation") &&
+                                !event.output.contains("TOOL_FAILURE:") &&
+                                !event.output.contains("Empty final plan received") &&
+                                !event.output.contains("Return ONLY valid JSON")
+
+                    if (shouldShowToolMessage) {
+                        appendHistoryMessage(
+                            ChatMessage(
+                                ChatMessage.Role.TOOL,
+                                "[${event.toolName}]\n${event.output}"
+                            )
+                        )
+                    }
+                }
+
+                is AgentEvent.ApprovalRequired -> {
+                    pendingApproval = event
+                    streamingAssistant = ""
+                    isSending = false
+                }
+
+                is AgentEvent.AssistantMessage -> {
+                    if (streamingAssistant.isNotBlank()) {
+                        streamingAssistant = ""
+                    }
+
+                    appendHistoryMessage(
+                        ChatMessage(ChatMessage.Role.ASSISTANT, event.text)
+                    )
+                }
+
+                AgentEvent.Completed -> {
+                    history = chatRepo.loadMessages(conversationId).map {
+                        ChatMessage(ChatMessage.Role.valueOf(it.role), it.content)
+                    }
+                    streamingAssistant = ""
+                    isSending = false
+                }
             }
         }
     }
@@ -353,6 +423,7 @@ class ChatController(
 
         // make UI consistent immediately
         streamingAssistant = ""
+        pendingApproval = null
         isSending = false
     }
 
