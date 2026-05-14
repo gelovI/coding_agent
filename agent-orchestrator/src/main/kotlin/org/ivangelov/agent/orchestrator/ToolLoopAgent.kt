@@ -42,6 +42,7 @@ import org.ivangelov.agent.orchestrator.edit.EditIntentDetector
 import org.ivangelov.agent.orchestrator.edit.EditStrategy
 import org.ivangelov.agent.orchestrator.edit.EditStrategySelector
 import org.ivangelov.agent.orchestrator.edit.KotlinBlockExtractor
+import org.ivangelov.agent.orchestrator.edit.ModelCodeOutputSanitizer
 import org.ivangelov.agent.orchestrator.edit.PatchBuilder
 import org.ivangelov.agent.orchestrator.edit.TargetBlock
 import java.util.UUID
@@ -971,11 +972,7 @@ class ToolLoopAgentFacade(
     }
 
     private fun sanitizeGeneratedFileContent(content: String): String {
-        return content
-            .replace("```kotlin", "")
-            .replace("```kt", "")
-            .replace("```", "")
-            .trim()
+        return ModelCodeOutputSanitizer.stripWrappingMarkdownFences(content)
     }
 
     private fun generateDeterministicScaffoldContent(
@@ -1860,9 +1857,10 @@ class ToolLoopAgentFacade(
             ?.takeIf { it.isNotBlank() }
             ?: response.thinking?.trim()?.takeIf { it.isNotBlank() }
             ?: return false
+        val sanitizedReplacement = ModelCodeOutputSanitizer.stripWrappingMarkdownFences(replacement)
 
         val originalNormalized = block.originalText.trim()
-        val replacementNormalized = replacement.trim()
+        val replacementNormalized = sanitizedReplacement.trim()
 
         if (replacementNormalized == originalNormalized) {
             val msg = "Keine Änderung erforderlich."
@@ -1875,7 +1873,7 @@ class ToolLoopAgentFacade(
         val replaceArgs = PatchBuilder.buildReplaceArgs(
             path = path,
             originalBlock = block.originalText,
-            replacementBlock = replacement
+            replacementBlock = sanitizedReplacement
         )
 
         val approvalMsg = "Änderungen in $path wurden durchgeführt."
@@ -1966,10 +1964,11 @@ class ToolLoopAgentFacade(
             ?.takeIf { it.isNotBlank() }
             ?: response.thinking?.trim()?.takeIf { it.isNotBlank() }
             ?: return false
+        val sanitizedRewritten = ModelCodeOutputSanitizer.stripWrappingMarkdownFences(rewritten)
 
         val args = buildJsonObject {
             put("path", JsonPrimitive(path))
-            put("content", JsonPrimitive(rewritten))
+            put("content", JsonPrimitive(sanitizedRewritten))
         }
 
         val approvalMsg = "Datei $path wurde neu geschrieben."
