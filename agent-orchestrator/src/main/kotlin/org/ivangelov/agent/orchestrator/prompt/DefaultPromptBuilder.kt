@@ -18,6 +18,13 @@ class DefaultPromptBuilder : PromptBuilder {
             ?.removePrefix("[tool_validation_error]")
             ?.trim()
 
+        val lastLlmViolation = history
+            .asReversed()
+            .firstOrNull { it.role == Role.TOOL && it.content.startsWith("[llm_violation]") }
+            ?.content
+            ?.removePrefix("[llm_violation]")
+            ?.trim()
+
         val systemPrompt = buildString {
             appendLine(SystemPrompts.toolModeWithAvailableTools(tools))
 
@@ -32,20 +39,27 @@ class DefaultPromptBuilder : PromptBuilder {
                 appendLine("Do not repeat the same invalid tool call.")
                 appendLine("Return valid JSON only.")
             }
+
+            if (!lastLlmViolation.isNullOrBlank()) {
+                appendLine()
+                appendLine("MODEL CORRECTION NOTICE:")
+                appendLine(lastLlmViolation)
+                appendLine("Return either valid tool_calls or a non-empty final reply.")
+            }
         }.trim()
 
-        val relevantHistory = history
-            .filterNot { it.role == Role.SYSTEM }
-            .takeLast(4)
-
-        return listOf(ChatMessage(Role.SYSTEM, systemPrompt)) + relevantHistory
+        return listOf(ChatMessage(Role.SYSTEM, systemPrompt)) + history
     }
 
     override fun buildForKnowledge(
         history: List<ChatMessage>
     ): List<ChatMessage> {
-        val sys = ChatMessage(Role.SYSTEM, SystemPrompts.CHAT_MODE)
-        val cleaned = history.filter { it.role == Role.USER || it.role == Role.ASSISTANT }
+        val sys = ChatMessage(Role.SYSTEM, SystemPrompts.KNOWLEDGE_MODE)
+
+        val cleaned = history
+            .filter { it.role == Role.USER || it.role == Role.ASSISTANT || it.role == Role.TOOL || it.role == Role.SYSTEM }
+            .takeLast(6)
+
         return listOf(sys) + cleaned
     }
 }

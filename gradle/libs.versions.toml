@@ -24,11 +24,13 @@ ktor-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-json", 
 
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref="sqldelight" }
 sqldelight-jdbc = { module = "app.cash.sqldelight:jdbc-driver", version.ref="sqldelight" }
+sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref="sqldelight" }
 
 okio = { module = "com.squareup.okio:okio", version.ref="okio" }
 
 slf4j = { module = "org.slf4j:slf4j-api", version.ref="slf4j" }
 logback = { module = "ch.qos.logback:logback-classic", version.ref="logback" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref="compose" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref="kotlin" }

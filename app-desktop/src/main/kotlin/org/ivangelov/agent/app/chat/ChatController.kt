@@ -230,12 +230,20 @@ class ChatController(
                                 streamingAssistant = ""
                             }
 
-                            appendHistoryMessage(
-                                ChatMessage(
-                                    ChatMessage.Role.TOOL,
-                                    "[${event.toolName}]\n${event.output}"
+                            val shouldShowToolMessage =
+                                event.toolName !in setOf("read_file", "llm_violation") &&
+                                        !event.output.contains("TOOL_FAILURE:") &&
+                                        !event.output.contains("Empty final plan received") &&
+                                        !event.output.contains("Return ONLY valid JSON")
+
+                            if (shouldShowToolMessage) {
+                                appendHistoryMessage(
+                                    ChatMessage(
+                                        ChatMessage.Role.TOOL,
+                                        "[${event.toolName}]\n${event.output}"
+                                    )
                                 )
-                            )
+                            }
                         }
 
                         is AgentEvent.AssistantMessage -> {

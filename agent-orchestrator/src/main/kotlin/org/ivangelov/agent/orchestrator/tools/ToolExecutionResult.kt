@@ -7,5 +7,6 @@ data class ToolExecutionResult(
     val normalizedArgs: JsonObject,
     val ok: Boolean,
     val rawOutput: String,
-    val userMessage: String?
+    val userMessage: String?,
+    val meta: Map<String, String> = emptyMap()
 )

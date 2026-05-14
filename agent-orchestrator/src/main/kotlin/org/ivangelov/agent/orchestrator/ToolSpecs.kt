@@ -29,7 +29,7 @@ object ToolSpecs {
     val ALL: Map<String, ToolSpec> = listOf(
         ToolSpec(
             name = "list_dir",
-            description = "List files and directories inside the current project path.",
+            description = "List files and directories inside the current project path. Use this before read_file when the exact file path is unknown.",
             args = listOf(
                 ToolArgSpec(
                     name = "path",
@@ -44,11 +44,11 @@ object ToolSpecs {
 
         ToolSpec(
             name = "read_file",
-            description = "Read a single file from the current project.",
+            description = "Read a single UTF-8 text file from the current project. The path must be project-relative if possible. Prefer exact project file paths such as 'src/main/java/com/example/app/MainActivity.kt'. Do not invent package-style shorthand paths if you do not know the exact file path.",
             args = listOf(
                 ToolArgSpec(
                     name = "path",
-                    description = "Relative file path inside the project.",
+                    description = "Relative file path inside the project. Example: 'src/main/java/com/example/app/MainActivity.kt'.",
                     required = true
                 )
             ),

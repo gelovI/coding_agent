@@ -51,4 +51,18 @@ interface MemoryCoordinator {
     suspend fun clearTenantMemory(
         tenantId: String
     ): Boolean
+
+    suspend fun storeProjectNote(
+        tenantId: String,
+        conversationId: String,
+        projectId: String,
+        text: String
+    ): Boolean
+
+    suspend fun storeProjectDecision(
+        tenantId: String,
+        conversationId: String,
+        projectId: String,
+        text: String
+    ): Boolean
 }

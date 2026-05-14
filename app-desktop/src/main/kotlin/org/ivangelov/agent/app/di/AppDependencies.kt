@@ -9,6 +9,7 @@ import org.ivangelov.agent.db.DbFactory
 import org.ivangelov.agent.memory.service.MemoryService
 import org.ivangelov.agent.orchestrator.memory.DefaultMemoryCoordinator
 import org.ivangelov.agent.orchestrator.memory.MemoryCoordinator
+import okio.FileSystem
 
 class AppDependencies private constructor(
     val logger: Logger,
@@ -31,24 +32,36 @@ class AppDependencies private constructor(
     companion object {
         fun create(): AppDependencies {
             val logger: Logger = StdoutLogger()
+            val config = AppConfigLoader.load()
 
             val defaultRoot = System.getProperty("user.dir").toPath()
             val rootResolver = ProjectRootResolver(defaultRoot = defaultRoot, logger = logger)
 
-            val db = DbFactory.create("coding-agent.db")
+            val db = DbFactory.create(config.dbPath)
             val chatRepo = org.ivangelov.agent.db.ChatRepository(db)
             val projectRepo = org.ivangelov.agent.db.ProjectRepository(db)
 
             val http = HttpClients.llm
 
             val llm = org.ivangelov.agent.llm.ollama.OllamaLlmClient(
-                model = "qwen2.5-coder:14b",
+                baseUrl = config.ollamaBaseUrl,
+                model = config.chatModel,
                 http = http
             )
 
             // memory pipeline (shared)
-            val embed = org.ivangelov.agent.llm.ollama.OllamaEmbedClient(http = http)
-            val qdrant = org.ivangelov.agent.memory.qdrant.QdrantMemoryStore(http = http)
+            val embed = org.ivangelov.agent.llm.ollama.OllamaEmbedClient(
+                http = http,
+                baseUrl = config.ollamaBaseUrl,
+                model = config.embeddingModel
+            )
+
+            val qdrant = org.ivangelov.agent.memory.qdrant.QdrantMemoryStore(
+                http = http,
+                baseUrl = config.qdrantBaseUrl,
+                collection = config.qdrantCollection
+            )
+
             val memory = MemoryService(embed = embed, store = qdrant)
             val memoryCoordinator = DefaultMemoryCoordinator(memory)
 
@@ -60,16 +73,33 @@ class AppDependencies private constructor(
                 projectId: String?,
                 memory: MemoryService
             ): org.ivangelov.agent.tools.ToolRegistry {
+                val fs = FileSystem.SYSTEM
+
+                val indexedFiles = fs.listRecursively(root)
+                    .filter { path ->
+                        runCatching { !fs.metadata(path).isDirectory }.getOrDefault(false)
+                    }
+                    .toList()
+
                 return org.ivangelov.agent.tools.ToolRegistry(
                     listOf(
-                        org.ivangelov.agent.tools.fs.ListDirTool(root),
-                        org.ivangelov.agent.tools.fs.ReadFileTool(root),
-                        org.ivangelov.agent.tools.fs.WriteFileTool(root),
+                        org.ivangelov.agent.tools.fs.ListDirTool(
+                            root = root,
+                            fs = fs
+                        ),
+                        org.ivangelov.agent.tools.fs.ReadFileTool(
+                            root = root,
+                            indexedFiles = indexedFiles,
+                            fs = fs
+                        ),
+                        org.ivangelov.agent.tools.fs.WriteFileTool(
+                            root = root,
+                            fs = fs
+                        ),
                         org.ivangelov.agent.tools.fs.WriteFilesTool(root),
                         org.ivangelov.agent.tools.fs.AppendToFileTool(root),
                         org.ivangelov.agent.tools.fs.ReplaceInFileTool(root),
 
-                        // Project indexing into vector memory
                         org.ivangelov.agent.tools.code.IndexProjectTool(
                             root = root,
                             memory = memory,
@@ -78,7 +108,6 @@ class AppDependencies private constructor(
                             projectId = projectId
                         ),
 
-                        // Retrieve relevant code chunks for architecture analysis
                         org.ivangelov.agent.tools.code.AnalyzeArchitectureTool(
                             memory = memory,
                             tenantId = tenantId,
@@ -106,7 +135,11 @@ class AppDependencies private constructor(
                         llm = llm,
                         tools = tools,
                         memory = memory,
-                        projectId = projectId
+                        projectRoot = toolsRoot,
+                        projectId = projectId,
+                        maxSteps = config.maxSteps,
+                        maxToolCallsTotal = config.maxToolCallsTotal,
+                        maxToolOutputChars = config.maxToolOutputChars
                     )
                 }
 

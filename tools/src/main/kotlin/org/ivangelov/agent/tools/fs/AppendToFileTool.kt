@@ -2,7 +2,6 @@ package org.ivangelov.agent.tools.fs
 
 import okio.FileSystem
 import okio.Path
-import okio.Path.Companion.toPath
 import org.ivangelov.agent.core.model.ToolCall
 import org.ivangelov.agent.core.model.ToolResult
 import org.ivangelov.agent.tools.Tool
@@ -24,7 +23,7 @@ class AppendToFileTool(
         return try {
             guard.validateWrite(rel, content)
 
-            val target = resolveSafe(rel)
+            val target = guard.resolveInsideRoot(rel)
             if (!FileSystem.SYSTEM.exists(target)) {
                 return ToolResult(
                     name = name,
@@ -54,17 +53,5 @@ class AppendToFileTool(
         } catch (e: Exception) {
             ToolResult(name, ok = false, content = "append_to_file failed: ${e.message}")
         }
-    }
-
-    private fun resolveSafe(relative: String): Path {
-        val relPath = relative.toPath(normalize = true)
-        val normalizedRoot = root.normalized()
-        val resolved = (normalizedRoot / relPath).normalized()
-
-        require(resolved.toString().startsWith(normalizedRoot.toString())) {
-            "Path escapes project root: $relative"
-        }
-
-        return resolved
     }
 }

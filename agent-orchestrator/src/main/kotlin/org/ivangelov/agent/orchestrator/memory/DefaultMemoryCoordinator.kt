@@ -150,4 +150,36 @@ class DefaultMemoryCoordinator(
             memory.deleteTenantMemory(tenantId)
         }.getOrDefault(false)
     }
+
+    override suspend fun storeProjectNote(
+        tenantId: String,
+        conversationId: String,
+        projectId: String,
+        text: String
+    ): Boolean {
+        return runCatching {
+            memory.storeProjectNote(
+                tenantId = tenantId,
+                conversationId = conversationId,
+                projectId = projectId,
+                text = text
+            )
+        }.getOrDefault(false)
+    }
+
+    override suspend fun storeProjectDecision(
+        tenantId: String,
+        conversationId: String,
+        projectId: String,
+        text: String
+    ): Boolean {
+        return runCatching {
+            memory.storeProjectDecision(
+                tenantId = tenantId,
+                conversationId = conversationId,
+                projectId = projectId,
+                text = text
+            )
+        }.getOrDefault(false)
+    }
 }

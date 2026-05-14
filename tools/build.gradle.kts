@@ -11,5 +11,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.okio)
     implementation(libs.kotlinx.serialization.json)
-    implementation("com.squareup.okio:okio:3.9.1")
+
+    testImplementation(kotlin("test"))
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

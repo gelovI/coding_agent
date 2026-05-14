@@ -11,7 +11,9 @@ enum class MemoryType {
     PREFERENCE,
     PROJECT_INFO,
     TOOL_RESULT,
-    TURN
+    TURN,
+    PROJECT_NOTE,
+    PROJECT_DECISION
 }
 
 @Serializable

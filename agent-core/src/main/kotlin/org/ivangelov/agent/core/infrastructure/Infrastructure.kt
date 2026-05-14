@@ -29,8 +29,8 @@ object HttpClients {
             }
             install(HttpTimeout) {
                 connectTimeoutMillis = 5_000
-                socketTimeoutMillis = 20_000
-                requestTimeoutMillis = 20_000
+                socketTimeoutMillis = 60_000
+                requestTimeoutMillis = 60_000
             }
         }
     }

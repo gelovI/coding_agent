@@ -9,7 +9,8 @@ import org.ivangelov.agent.tools.Tool
 
 class ReplaceInFileTool(
     private val root: Path,
-    private val guard: ExecutionGuard = ExecutionGuard(root)
+    private val guard: ExecutionGuard = ExecutionGuard(root),
+    private val fs: FileSystem = FileSystem.SYSTEM
 ) : Tool {
 
     override val name: String = "replace_in_file"
@@ -29,13 +30,18 @@ class ReplaceInFileTool(
         }
 
         return try {
-            val target = resolveSafe(rel)
+            val target = guard.resolveInsideRoot(rel)
 
-            if (!FileSystem.SYSTEM.exists(target)) {
+            if (!fs.exists(target)) {
                 return ToolResult(name, ok = false, content = "File does not exist: $rel")
             }
 
-            val existing = FileSystem.SYSTEM.read(target) { readUtf8() }
+            val meta = fs.metadata(target)
+            if (meta.isDirectory) {
+                return ToolResult(name, ok = false, content = "Path is a directory, not a file: $rel")
+            }
+
+            val existing = fs.read(target) { readUtf8() }
 
             val occurrences = existing.windowed(search.length, 1).count { it == search }
             if (occurrences == 0) {
@@ -53,7 +59,7 @@ class ReplaceInFileTool(
             val updated = existing.replaceFirst(search, replace)
             guard.validateWrite(rel, updated)
 
-            FileSystem.SYSTEM.write(target) {
+            fs.write(target) {
                 writeUtf8(updated)
             }
 
@@ -71,14 +77,25 @@ class ReplaceInFileTool(
     }
 
     private fun resolveSafe(relative: String): Path {
-        val relPath = relative.toPath(normalize = true)
+        val relPath = relative
+            .trim()
+            .replace("\\", "/")
+            .toPath(normalize = true)
+
         val normalizedRoot = root.normalized()
         val resolved = (normalizedRoot / relPath).normalized()
 
-        require(resolved.toString().startsWith(normalizedRoot.toString())) {
+        require(isInsideRoot(resolved, normalizedRoot)) {
             "Path escapes project root: $relative"
         }
 
         return resolved
+    }
+
+    private fun isInsideRoot(child: Path, root: Path): Boolean {
+        val childSeg = child.normalized().segments
+        val rootSeg = root.normalized().segments
+        return childSeg.size >= rootSeg.size &&
+                childSeg.take(rootSeg.size) == rootSeg
     }
 }

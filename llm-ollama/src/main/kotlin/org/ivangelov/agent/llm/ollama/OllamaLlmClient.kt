@@ -28,13 +28,18 @@ import org.ivangelov.agent.core.ports.ToolModeResponse
 
 class OllamaLlmClient(
     private val baseUrl: String = "http://localhost:11434",
-    private val model: String = "qwen2.5-coder:14b",
+    private val model: String = "qwen2.5-coder:7b",
     private val http: HttpClient = HttpClients.llm
 ) : LLMClient {
 
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    private fun String.redactedForLog(maxChars: Int = 500): String {
+        val compact = replace(Regex("\\s+"), " ").trim()
+        return if (compact.length <= maxChars) compact else compact.take(maxChars) + "...(truncated)"
     }
 
     override suspend fun complete(
@@ -67,7 +72,7 @@ class OllamaLlmClient(
         val body = resp.bodyAsText()
 
         if (!resp.status.isSuccess()) {
-            throw IllegalStateException("Ollama HTTP ${resp.status.value}: $body")
+            throw IllegalStateException("Ollama HTTP ${resp.status.value}: ${body.redactedForLog()}")
         }
 
         val decoded = json.decodeFromString(OllamaChatResponse.serializer(), body)
@@ -114,14 +119,13 @@ class OllamaLlmClient(
 
             val body = resp.bodyAsText()
 
-            println("=== TOOL MODE HTTP STATUS === ${resp.status}")
-            println("=== TOOL MODE RAW HTTP BODY ===")
-            println(body)
-            println("==============================")
+            println("TOOL_MODE_HTTP_STATUS=${resp.status}")
+            println("TOOL_MODE_BODY_PREVIEW=${body.redactedForLog()}")
+
 
             if (!resp.status.isSuccess()) {
                 return AgentResult.Failure(
-                    AgentError.LlmFailure("Ollama HTTP ${resp.status.value}: $body")
+                    AgentError.LlmFailure("Ollama HTTP ${resp.status.value}: ${body.redactedForLog()}")
                 )
             }
 
@@ -166,8 +170,8 @@ class OllamaLlmClient(
             }
 
             println("DEBUG_COMPLETE_TOOL_MODE_FINAL")
-            println("finalToolCalls=$finalToolCalls")
-            println("finalReply=$finalReply")
+            println("finalToolCalls=${finalToolCalls.map { it.name }}")
+            println("finalReplyPreview=${finalReply.orEmpty().redactedForLog()}")
 
             AgentResult.Success(
                 ToolModeResponse(
@@ -206,7 +210,7 @@ class OllamaLlmClient(
 
         if (!resp.status.isSuccess()) {
             val body = resp.bodyAsText()
-            throw IllegalStateException("Ollama HTTP ${resp.status.value}: $body")
+            throw IllegalStateException("Ollama HTTP ${resp.status.value}: ${body.redactedForLog()}")
         }
 
         val channel: ByteReadChannel = resp.bodyAsChannel()

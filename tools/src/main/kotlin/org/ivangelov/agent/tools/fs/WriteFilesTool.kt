@@ -6,7 +6,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okio.FileSystem
 import okio.Path
-import okio.Path.Companion.toPath
 import org.ivangelov.agent.core.model.ToolCall
 import org.ivangelov.agent.core.model.ToolResult
 import org.ivangelov.agent.tools.Tool
@@ -50,7 +49,7 @@ class WriteFilesTool(
 
             try {
                 for (file in fileSpecs) {
-                    val target = resolveSafe(file.path)
+                    val target = guard.resolveInsideRoot(file.path)
 
                     val previousContent =
                         if (FileSystem.SYSTEM.exists(target)) {
@@ -111,17 +110,5 @@ class WriteFilesTool(
                 // Best-effort rollback
             }
         }
-    }
-
-    private fun resolveSafe(relative: String): Path {
-        val relPath = relative.toPath(normalize = true)
-        val normalizedRoot = root.normalized()
-        val resolved = (normalizedRoot / relPath).normalized()
-
-        require(resolved.toString().startsWith(normalizedRoot.toString())) {
-            "Path escapes project root: $relative"
-        }
-
-        return resolved
     }
 }

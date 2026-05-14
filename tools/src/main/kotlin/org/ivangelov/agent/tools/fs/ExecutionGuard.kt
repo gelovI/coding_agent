@@ -15,6 +15,31 @@ class ExecutionGuard(
         ".idea"
     )
 
+    fun resolveInsideRoot(path: String): Path {
+        require(path.isNotBlank()) { "Path is empty" }
+        require(!path.startsWith("/")) { "Absolute paths are not allowed: $path" }
+        require(!path.contains(":\\") && !path.contains(":/")) {
+            "Absolute paths are not allowed: $path"
+        }
+        require(!path.contains("..")) { "Path traversal is not allowed: $path" }
+
+        val relPath = path.trim().ifBlank { "." }.toPath(normalize = true)
+        val normalizedRoot = projectRoot.normalized()
+        val resolved = (normalizedRoot / relPath).normalized()
+
+        val rootSegments = normalizedRoot.segments
+        val resolvedSegments = resolved.segments
+
+        require(
+            resolvedSegments.size >= rootSegments.size &&
+                    resolvedSegments.take(rootSegments.size) == rootSegments
+        ) {
+            "Path escapes project root: $path"
+        }
+
+        return resolved
+    }
+
     fun validateWrite(path: String, content: String) {
         require(path.isNotBlank()) { "Path is empty" }
         require(content.isNotBlank()) { "Content is empty" }
@@ -22,21 +47,12 @@ class ExecutionGuard(
             "Content too large (${content.length} chars > $maxContentChars)"
         }
 
-        require(!path.startsWith("/")) { "Absolute paths are not allowed: $path" }
-        require(!path.contains(":\\") && !path.contains(":/")) {
-            "Absolute paths are not allowed: $path"
-        }
-        require(!path.contains("..")) { "Path traversal is not allowed: $path" }
+        resolveInsideRoot(path)
 
-        val relPath = path.toPath(normalize = true)
-        val normalizedRoot = projectRoot.normalized()
-        val resolved = (normalizedRoot / relPath).normalized()
-
-        require(resolved.toString().startsWith(normalizedRoot.toString())) {
-            "Path escapes project root: $path"
-        }
-
-        val normalizedSegments = relPath.segments.map { it.trim() }.filter { it.isNotEmpty() }
+        val relPath = path.trim().toPath(normalize = true)
+        val normalizedSegments = relPath.segments
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
         if (normalizedSegments.isNotEmpty()) {
             val firstSegment = normalizedSegments.first()

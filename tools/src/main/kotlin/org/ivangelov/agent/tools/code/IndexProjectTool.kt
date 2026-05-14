@@ -1,14 +1,19 @@
 package org.ivangelov.agent.tools.code
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import okio.FileSystem
 import okio.Path
 import org.ivangelov.agent.core.model.ToolCall
 import org.ivangelov.agent.core.model.ToolResult
-import org.ivangelov.agent.tools.Tool
-import org.ivangelov.agent.memory.service.MemoryService
 import org.ivangelov.agent.memory.core.MemoryScope
-import org.ivangelov.agent.tools.code.indexing.CodeChunker
 import org.ivangelov.agent.memory.core.MemoryType
+import org.ivangelov.agent.memory.service.MemoryService
+import org.ivangelov.agent.tools.Tool
+import org.ivangelov.agent.tools.code.indexing.CodeChunker
+import org.ivangelov.agent.tools.fs.ExecutionGuard
 
 class IndexProjectTool(
     private val root: Path,
@@ -16,45 +21,66 @@ class IndexProjectTool(
     private val memory: MemoryService,
     private val tenantId: String,
     private val conversationId: String,
-    private val projectId: String?
+    private val projectId: String?,
+    private val guard: ExecutionGuard = ExecutionGuard(root)
 ) : Tool {
 
     override val name: String = "index_project"
 
     override suspend fun execute(call: ToolCall): ToolResult {
-        val kotlinFiles = fs.listRecursively(root)
-            .filter { it.name.endsWith(".kt", ignoreCase = true) }
+        val options = parseOptions(call)
+        val start = guard.resolveInsideRoot(options.path)
+
+        if (!fs.exists(start)) {
+            return ToolResult(name, ok = false, content = "Index path does not exist: ${options.path}")
+        }
+
+        if (!fs.metadata(start).isDirectory) {
+            return ToolResult(name, ok = false, content = "Index path is not a directory: ${options.path}")
+        }
+
+        val candidateFiles = fs.listRecursively(start)
+            .filter { path -> shouldIndex(path, options.includeExtensions) }
+            .take(options.maxFiles)
             .toList()
 
         var fileCount = 0
+        var skippedCount = 0
         var chunkCount = 0
 
-        for (path in kotlinFiles) {
-            val content = fs.read(path) { readUtf8() }
-            if (content.isBlank()) continue
+        val memConversationId =
+            if (projectId != null) "project-index:$projectId" else conversationId
+
+        for (path in candidateFiles) {
+            val content = try {
+                fs.read(path) { readUtf8() }
+            } catch (_: Exception) {
+                skippedCount++
+                continue
+            }
+
+            if (content.isBlank()) {
+                skippedCount++
+                continue
+            }
 
             fileCount++
 
+            val relativePath = makeRelativeToRoot(path)
             val chunks = CodeChunker.chunkCode(
-                filePath = path.toString(),
+                filePath = relativePath,
                 content = content
             )
 
-            for (c in chunks) {
-                // Soft-Metadata im Text (damit Retrieval später File/Chunk erkennen kann)
+            for (chunk in chunks) {
                 val payload = buildString {
                     appendLine("TYPE:CODE")
-                    appendLine("FILE:${c.filePath}")
-                    appendLine("CHUNK:${c.index + 1}/${c.total}")
+                    appendLine("FILE:${chunk.filePath}")
+                    appendLine("CHUNK:${chunk.index + 1}/${chunk.total}")
                     appendLine("---")
-                    append(c.content)
+                    append(chunk.content)
                 }
 
-                // Index in PROJECT scope
-                val memConversationId =
-                    if (projectId != null) "project-index:$projectId" else conversationId
-
-                println("INDEX_UPSERT start projectId=$projectId scope=PROJECT conv=$memConversationId")
                 val ok = memory.storeIndexText(
                     tenantId = tenantId,
                     conversationId = memConversationId,
@@ -63,19 +89,116 @@ class IndexProjectTool(
                     type = MemoryType.PROJECT_INFO,
                     text = payload
                 )
-                println("INDEX_UPSERT done")
 
                 if (ok) chunkCount++
             }
         }
 
-        val count = memory.debugCountPoints()
-        println("QDRANT_COUNT_AFTER_INDEX=$count")
+        val totalCount = runCatching { memory.debugCountPoints() }.getOrNull()
 
         return ToolResult(
             name = name,
             ok = true,
-            content = "✅ Indexierung abgeschlossen: $fileCount Dateien, $chunkCount Chunks im PROJECT-Memory gespeichert."
+            content = buildString {
+                append("Indexierung abgeschlossen: ")
+                append("$fileCount Dateien, ")
+                append("$chunkCount Chunks")
+                append(", $skippedCount übersprungen")
+                append(".")
+                append(" Startpfad: ${options.path}.")
+                append(" Extensions: ${options.includeExtensions.joinToString(",")}.")
+                append(" Limit: ${options.maxFiles}.")
+                if (totalCount != null) {
+                    append(" Qdrant-Punkte gesamt: $totalCount.")
+                }
+            },
+            meta = mapOf(
+                "files" to fileCount.toString(),
+                "chunks" to chunkCount.toString(),
+                "skipped" to skippedCount.toString(),
+                "path" to options.path,
+                "max_files" to options.maxFiles.toString(),
+                "include_ext" to options.includeExtensions.joinToString(",")
+            )
+        )
+    }
+
+    private fun parseOptions(call: ToolCall): IndexOptions {
+        val path = call.argsJson["path"]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "."
+
+        val maxFiles = call.argsJson["max_files"]
+            ?.jsonPrimitive
+            ?.intOrNull
+            ?.coerceIn(1, 2_000)
+            ?: 500
+
+        val includeExtensions = parseIncludeExtensions(call)
+            .ifEmpty { setOf("kt", "kts", "gradle", "xml", "json", "md") }
+
+        return IndexOptions(
+            path = path,
+            maxFiles = maxFiles,
+            includeExtensions = includeExtensions
+        )
+    }
+
+    private fun parseIncludeExtensions(call: ToolCall): Set<String> {
+        val raw = call.argsJson["include_ext"] ?: return emptySet()
+
+        val values = when (raw) {
+            is JsonArray -> raw.mapNotNull { it.jsonPrimitive.contentOrNull }
+            else -> raw.jsonPrimitive.contentOrNull
+                ?.split(",", " ", ";")
+                .orEmpty()
+        }
+
+        return values
+            .map { it.trim().lowercase().removePrefix(".") }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    private fun shouldIndex(path: Path, includeExtensions: Set<String>): Boolean {
+        if (fs.metadata(path).isDirectory) return false
+        if (path.segments.any { it in skippedDirectories }) return false
+
+        val extension = path.name.substringAfterLast('.', missingDelimiterValue = "")
+            .lowercase()
+
+        if (extension == "gradle" && path.name.endsWith(".gradle.kts")) {
+            return "gradle" in includeExtensions || "kts" in includeExtensions
+        }
+
+        return extension in includeExtensions
+    }
+
+    private fun makeRelativeToRoot(path: Path): String {
+        val rootSegments = root.normalized().segments
+        val pathSegments = path.normalized().segments
+
+        return pathSegments
+            .drop(rootSegments.size)
+            .joinToString("/")
+    }
+
+    private data class IndexOptions(
+        val path: String,
+        val maxFiles: Int,
+        val includeExtensions: Set<String>
+    )
+
+    private companion object {
+        val skippedDirectories = setOf(
+            ".git",
+            ".gradle",
+            "build",
+            "out",
+            ".idea"
         )
     }
 }

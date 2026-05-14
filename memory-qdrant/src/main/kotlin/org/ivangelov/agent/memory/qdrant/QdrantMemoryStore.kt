@@ -16,6 +16,11 @@ class QdrantMemoryStore(
     private val collection: String = "agent_memory"
 ) : MemoryStore {
 
+    private fun String.redactedForLog(maxChars: Int = 500): String {
+        val compact = replace(Regex("\\s+"), " ").trim()
+        return if (compact.length <= maxChars) compact else compact.take(maxChars) + "...(truncated)"
+    }
+
     suspend fun ensureCollection(vectorSize: Int) {
         val check = http.get("$baseUrl/collections/$collection")
         if (check.status.value == 200) return
@@ -74,10 +79,10 @@ class QdrantMemoryStore(
 
         val body = resp.bodyAsText()
         println("QDRANT_UPSERT_STATUS=${resp.status}")
-        println("QDRANT_UPSERT_BODY=$body")
+        println("QDRANT_UPSERT_BODY_PREVIEW=${body.redactedForLog()}")
 
         require(resp.status.value in 200..299) {
-            "Qdrant upsert failed: ${resp.status} body=$body"
+            "Qdrant upsert failed: ${resp.status} body=${body.redactedForLog()}"
         }
     }
 
@@ -128,10 +133,10 @@ class QdrantMemoryStore(
 
         val raw = httpResp.bodyAsText()
         println("QDRANT_SEARCH_STATUS=${httpResp.status}")
-        println("QDRANT_SEARCH_BODY=$raw")
+        println("QDRANT_SEARCH_BODY_PREVIEW=${raw.redactedForLog()}")
 
         require(httpResp.status.value in 200..299) {
-            "Qdrant search failed: $raw"
+            "Qdrant search failed: ${raw.redactedForLog()}"
         }
 
         val json = Json { ignoreUnknownKeys = true }
@@ -213,7 +218,7 @@ class QdrantMemoryStore(
 
         val body = resp.bodyAsText()
         println("QDRANT_DELETE_STATUS=${resp.status}")
-        println("QDRANT_DELETE_BODY=$body")
+        println("QDRANT_DELETE_BODY_PREVIEW=${body.redactedForLog()}")
 
         return resp.status.value in 200..299
     }

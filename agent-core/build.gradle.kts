@@ -14,13 +14,12 @@ dependencies {
     implementation(libs.kotlinx.datetime)
     implementation(libs.uuid)
 
-    api("io.ktor:ktor-client-core:2.3.12")
+    api(libs.ktor.client.core)
 
     // Ktor client
-    implementation("io.ktor:ktor-client-core:2.3.12")
-    implementation("io.ktor:ktor-client-cio:2.3.12")
+    implementation(libs.ktor.client.cio)
 
     // JSON negotiation
-    implementation("io.ktor:ktor-client-content-negotiation:2.3.12")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.12")
+    implementation(libs.ktor.client.contentneg)
+    implementation(libs.ktor.serialization.json)
 }

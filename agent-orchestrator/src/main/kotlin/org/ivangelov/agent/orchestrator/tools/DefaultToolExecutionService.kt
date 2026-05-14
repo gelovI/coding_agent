@@ -50,10 +50,36 @@ class DefaultToolExecutionService(
             val text = if (r.ok) r.content else "ERROR: ${r.content}"
 
             if (!r.ok) {
+
+                val enhancedMessage = when (toolName) {
+                    "replace_in_file" ->
+                        """
+            [replace_in_file]
+            FAILED: ${r.content}
+            
+            Reason:
+            - The search string was not found in the file
+            
+            Requirements:
+            - search MUST exactly match existing file content
+            - do NOT invent code
+            - use read_file to inspect the real content first
+            
+            Instructions:
+            1. Call read_file with the same path
+            2. Extract the exact function or code block
+            3. Retry replace_in_file with correct search
+            
+            Return ONLY valid JSON.
+            """.trimIndent()
+
+                    else -> r.content
+                }
+
                 AgentResult.Failure(
                     AgentError.ToolFailure(
                         toolName = toolName,
-                        message = r.content
+                        message = enhancedMessage
                     )
                 )
             } else {
@@ -63,7 +89,8 @@ class DefaultToolExecutionService(
                         normalizedArgs = args,
                         ok = true,
                         rawOutput = text.take(maxToolOutputChars),
-                        userMessage = presenter.successMessage(toolName, args)
+                        userMessage = presenter.successMessage(toolName, args),
+                        meta = r.meta
                     )
                 )
             }

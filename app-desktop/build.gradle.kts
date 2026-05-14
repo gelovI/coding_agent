@@ -15,10 +15,10 @@ dependencies {
     implementation(project(":memory-sqldelight"))
     implementation(project(":tools"))
     implementation(project(":memory-qdrant"))
-    implementation("com.squareup.okio:okio:3.9.1")
+    implementation(libs.okio)
     implementation(compose.desktop.currentOs)
-    implementation("org.jetbrains.compose.material3:material3:1.7.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+    implementation(libs.compose.material3)
+    implementation(libs.kotlinx.datetime)
     implementation(compose.materialIconsExtended)
 }
 

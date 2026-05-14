@@ -1,15 +1,15 @@
 plugins {
-    kotlin("jvm")
-    id("app.cash.sqldelight") version "2.0.2"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.sqldelight)
 }
 
 kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(project(":agent-core"))
-    implementation("app.cash.sqldelight:runtime:2.0.2")
-    implementation("app.cash.sqldelight:sqlite-driver:2.0.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+    implementation(libs.sqldelight.runtime)
+    implementation(libs.sqldelight.sqlite.driver)
+    implementation(libs.kotlinx.datetime)
 }
 
 sqldelight {
@@ -22,8 +22,31 @@ sqldelight {
     }
 }
 
-tasks.configureEach {
-    if (name.contains("verify", ignoreCase = true) && name.contains("Migration", ignoreCase = true)) {
-        enabled = false
+val verifySqlDelightMigrations = providers.gradleProperty("verifySqlDelightMigrations")
+    .map(String::toBoolean)
+    .getOrElse(false)
+
+afterEvaluate {
+    tasks.matching {
+        name.contains("verify", ignoreCase = true) &&
+                name.contains("Migration", ignoreCase = true)
+    }.configureEach {
+        enabled = verifySqlDelightMigrations
+        onlyIf { verifySqlDelightMigrations }
+        doFirst {
+            System.setProperty("java.io.tmpdir", "C:/tmp")
+            System.setProperty("org.sqlite.tmpdir", "C:/tmp")
+        }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    if (!verifySqlDelightMigrations) {
+        allTasks
+            .filter { it.project == project && it.name.contains("verify", ignoreCase = true) && it.name.contains("Migration", ignoreCase = true) }
+            .forEach { task ->
+                task.enabled = false
+                task.onlyIf { false }
+            }
     }
 }
