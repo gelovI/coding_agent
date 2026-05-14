@@ -1822,7 +1822,12 @@ class ToolLoopAgentFacade(
             }
 
             EditStrategy.NEEDS_TARGET_LOCALIZATION -> {
-                val msg = "Änderung ist noch nicht präzise genug lokalisiert. Zielblock konnte nicht sicher bestimmt werden."
+                val reason = plan.reason?.takeIf { it.isNotBlank() }
+                val msg = if (reason == null) {
+                    "Änderung ist noch nicht präzise genug lokalisiert. Zielblock konnte nicht sicher bestimmt werden."
+                } else {
+                    "Änderung ist noch nicht präzise genug lokalisiert: $reason"
+                }
                 repo.appendMessage(conversationId, Role.ASSISTANT, msg)
                 emit(AgentEvent.AssistantMessage(msg))
                 emit(AgentEvent.Completed)

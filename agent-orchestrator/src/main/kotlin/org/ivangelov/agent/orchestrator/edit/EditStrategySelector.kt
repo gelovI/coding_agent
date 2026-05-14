@@ -2,6 +2,11 @@ package org.ivangelov.agent.orchestrator.edit
 
 object EditStrategySelector {
 
+    private const val SMALL_FILE_FULL_REWRITE_LIMIT = 8_000
+    private const val SMALL_FILE_MANY_EDITS_REWRITE_LIMIT = 10_000
+    private const val SMALL_LOCAL_BLOCK_LIMIT = 4_000
+    private const val LARGE_BLOCK_REWRITE_LIMIT = 16_000
+
     fun choose(
         fileContent: String,
         intent: EditIntent,
@@ -17,7 +22,7 @@ object EditStrategySelector {
         }
 
         if (targetBlocks.isEmpty()) {
-            return if (fileLength < 8_000) {
+            return if (fileLength < SMALL_FILE_FULL_REWRITE_LIMIT) {
                 EditPlan(
                     strategy = EditStrategy.FULL_FILE_REWRITE,
                     reason = "No target block found, but file is small enough for full rewrite."
@@ -32,20 +37,31 @@ object EditStrategySelector {
 
         if (targetBlocks.size == 1) {
             val block = targetBlocks.first()
-            val smallLocalEdit = block.originalText.length < 4_000
+            val blockLength = block.originalText.length
 
-            return if (smallLocalEdit) {
-                EditPlan(
-                    strategy = EditStrategy.BLOCK_REWRITE,
-                    targetBlocks = targetBlocks,
-                    reason = "Single local block edit."
-                )
-            } else {
-                EditPlan(
-                    strategy = EditStrategy.BLOCK_REWRITE,
-                    targetBlocks = targetBlocks,
-                    reason = "Single large block edit, but still safer than full rewrite."
-                )
+            return when {
+                blockLength < SMALL_LOCAL_BLOCK_LIMIT -> {
+                    EditPlan(
+                        strategy = EditStrategy.BLOCK_REWRITE,
+                        targetBlocks = targetBlocks,
+                        reason = "Single local block edit."
+                    )
+                }
+
+                blockLength <= LARGE_BLOCK_REWRITE_LIMIT -> {
+                    EditPlan(
+                        strategy = EditStrategy.BLOCK_REWRITE,
+                        targetBlocks = targetBlocks,
+                        reason = "Single large block edit, but still safer than full rewrite."
+                    )
+                }
+
+                else -> {
+                    EditPlan(
+                        strategy = EditStrategy.NEEDS_TARGET_LOCALIZATION,
+                        reason = "Target block is too large for a reliable rewrite; needs a narrower function or section."
+                    )
+                }
             }
         }
 
@@ -57,7 +73,7 @@ object EditStrategySelector {
             )
         }
 
-        return if (fileLength < 10_000) {
+        return if (fileLength < SMALL_FILE_MANY_EDITS_REWRITE_LIMIT) {
             EditPlan(
                 strategy = EditStrategy.FULL_FILE_REWRITE,
                 reason = "Too many local edits; full rewrite safer for smaller file."
