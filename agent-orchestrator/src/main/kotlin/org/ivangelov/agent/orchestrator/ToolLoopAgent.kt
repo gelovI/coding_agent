@@ -30,8 +30,11 @@ import org.ivangelov.agent.orchestrator.input.DefaultUserInputSanitizer
 import org.ivangelov.agent.orchestrator.input.UserInputSanitizer
 import org.ivangelov.agent.orchestrator.memory.DefaultMemoryCoordinator
 import org.ivangelov.agent.orchestrator.memory.MemoryCoordinator
+import org.ivangelov.agent.orchestrator.path.ProjectPathResolver
 import org.ivangelov.agent.orchestrator.prompt.DefaultPromptBuilder
 import org.ivangelov.agent.orchestrator.prompt.PromptBuilder
+import org.ivangelov.agent.orchestrator.request.RequestMode
+import org.ivangelov.agent.orchestrator.request.RequestModeDetector
 import org.ivangelov.agent.orchestrator.tools.DefaultToolExecutionService
 import org.ivangelov.agent.orchestrator.tools.ToolExecutionResult
 import org.ivangelov.agent.orchestrator.tools.ToolExecutionService
@@ -90,12 +93,6 @@ class ToolLoopAgentFacade(
     private var scaffoldingPlanRejectedCount: Int = 0
     private var pendingMutationApproval: PendingMutationApproval? = null
     private var approvedMutationRequestId: String? = null
-
-    private enum class RequestMode {
-        ANALYSIS,
-        MODIFICATION,
-        SCAFFOLDING
-    }
 
     private data class ToolLoopSessionState(
         var step: Int = 0,
@@ -172,14 +169,6 @@ class ToolLoopAgentFacade(
         approvedMutationRequestId = null
     }
 
-    private fun detectRequestMode(userText: String): RequestMode {
-        return when {
-            wantsProjectScaffolding(userText) -> RequestMode.SCAFFOLDING
-            wantsFileModification(userText) -> RequestMode.MODIFICATION
-            else -> RequestMode.ANALYSIS
-        }
-    }
-
     override fun send(userText: String): Flow<AgentEvent> = flow {
         resetTurnState()
 
@@ -191,7 +180,7 @@ class ToolLoopAgentFacade(
 
         storeIncomingUserTurn(sanitizedUserText, emitEvent)
 
-        when (detectRequestMode(sanitizedUserText)) {
+        when (RequestModeDetector.detect(sanitizedUserText)) {
             RequestMode.SCAFFOLDING -> runScaffoldingLoop(sanitizedUserText, emitEvent)
             RequestMode.MODIFICATION -> runModificationLoop(sanitizedUserText, emitEvent)
             RequestMode.ANALYSIS -> runAnalysisLoop(sanitizedUserText, emitEvent)
@@ -2150,7 +2139,7 @@ class ToolLoopAgentFacade(
 
     private fun shouldTrySmartEditFirst(userText: String): Boolean {
         if (projectId == null) return false
-        if (!wantsFileModification(userText)) return false
+        if (!RequestModeDetector.wantsFileModification(userText)) return false
         return extractMentionedFilePath(userText) != null
     }
 
@@ -2248,7 +2237,7 @@ class ToolLoopAgentFacade(
         plan: ValidatedAgentPlan,
         discoveryReady: Boolean
     ): String? {
-        if (!wantsProjectScaffolding(userText)) return null
+        if (!RequestModeDetector.wantsProjectScaffolding(userText)) return null
 
         val toolCalls = plan.toolCalls
         if (toolCalls.isEmpty()) {
@@ -2836,74 +2825,4 @@ private fun isMutatingTool(toolName: String): Boolean {
         "append_to_file",
         "replace_in_file"
     )
-}
-
-private class ProjectPathResolver(
-    private val projectRoot: Path
-) {
-    fun tryResolveMentionedPath(userText: String): String? {
-        val normalizedText = userText.replace("\\", "/")
-
-        extractAbsolutePath(normalizedText)?.let { abs ->
-            return absoluteToProjectRelative(abs)
-        }
-
-        extractRelativePath(normalizedText)?.let { rel ->
-            return normalizeRelative(rel)
-        }
-
-        extractFileName(normalizedText)?.let { fileName ->
-            return normalizeRelative(fileName)
-        }
-
-        return null
-    }
-
-    fun normalizeRelative(path: String): String {
-        return path
-            .trim()
-            .replace("\\", "/")
-            .removePrefix("./")
-            .removePrefix("/")
-            .toPath(normalize = true)
-            .toString()
-            .replace("\\", "/")
-    }
-
-    fun absoluteToProjectRelative(rawAbsolute: String): String? {
-        val absolute = rawAbsolute.replace("\\", "/").toPath(normalize = true)
-        val root = projectRoot.normalized()
-
-        if (!isInsideRoot(absolute, root)) return null
-
-        return makeRelativeToRoot(absolute, root)
-    }
-
-    private fun extractAbsolutePath(text: String): String? {
-        val absoluteRegex = Regex("""([A-Za-z]:/[^ \n\r\t"']+?\.(kt|java|xml|json|kts|gradle))""")
-        return absoluteRegex.find(text)?.groupValues?.getOrNull(1)
-    }
-
-    private fun extractRelativePath(text: String): String? {
-        val relRegex = Regex("""((?:[\w.-]+/)+[\w.-]+\.(kt|java|xml|json|kts|gradle))""")
-        return relRegex.find(text)?.groupValues?.getOrNull(1)
-    }
-
-    private fun extractFileName(text: String): String? {
-        val fileRegex = Regex("""([\w.-]+\.(kt|java|xml|json|kts|gradle))""")
-        return fileRegex.find(text)?.groupValues?.getOrNull(1)
-    }
-
-    private fun isInsideRoot(child: Path, root: Path): Boolean {
-        val childSeg = child.normalized().segments
-        val rootSeg = root.normalized().segments
-        return childSeg.size >= rootSeg.size &&
-                childSeg.take(rootSeg.size) == rootSeg
-    }
-
-    private fun makeRelativeToRoot(path: Path, root: Path): String {
-        val fullSeg = path.normalized().segments
-        val rootSeg = root.normalized().segments
-        return fullSeg.drop(rootSeg.size).joinToString("/")
-    }
 }

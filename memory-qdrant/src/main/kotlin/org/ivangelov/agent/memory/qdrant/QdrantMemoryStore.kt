@@ -9,12 +9,15 @@ import kotlinx.serialization.json.*
 import org.ivangelov.agent.core.infrastructure.HttpClients
 import org.ivangelov.agent.memory.core.*
 import org.ivangelov.agent.memory.core.MemoryStore
+import org.slf4j.LoggerFactory
 
 class QdrantMemoryStore(
     private val http: HttpClient = HttpClients.qdrant,
     private val baseUrl: String = "http://127.0.0.1:6333",
     private val collection: String = "agent_memory"
 ) : MemoryStore {
+
+    private val logger = LoggerFactory.getLogger(QdrantMemoryStore::class.java)
 
     private fun String.redactedForLog(maxChars: Int = 500): String {
         val compact = replace(Regex("\\s+"), " ").trim()
@@ -25,7 +28,7 @@ class QdrantMemoryStore(
         val check = http.get("$baseUrl/collections/$collection")
         if (check.status.value == 200) return
 
-        println("Creating Qdrant collection: $collection at $baseUrl (dim=$vectorSize)")
+        logger.info("Creating Qdrant collection={} baseUrl={} vectorSize={}", collection, baseUrl, vectorSize)
 
         val createResp = http.put("$baseUrl/collections/$collection") {
             contentType(ContentType.Application.Json)
@@ -78,8 +81,8 @@ class QdrantMemoryStore(
         }
 
         val body = resp.bodyAsText()
-        println("QDRANT_UPSERT_STATUS=${resp.status}")
-        println("QDRANT_UPSERT_BODY_PREVIEW=${body.redactedForLog()}")
+        logger.debug("Qdrant upsert status={}", resp.status)
+        logger.trace("Qdrant upsert body preview={}", body.redactedForLog())
 
         require(resp.status.value in 200..299) {
             "Qdrant upsert failed: ${resp.status} body=${body.redactedForLog()}"
@@ -132,8 +135,8 @@ class QdrantMemoryStore(
         }
 
         val raw = httpResp.bodyAsText()
-        println("QDRANT_SEARCH_STATUS=${httpResp.status}")
-        println("QDRANT_SEARCH_BODY_PREVIEW=${raw.redactedForLog()}")
+        logger.debug("Qdrant search status={}", httpResp.status)
+        logger.trace("Qdrant search body preview={}", raw.redactedForLog())
 
         require(httpResp.status.value in 200..299) {
             "Qdrant search failed: ${raw.redactedForLog()}"
@@ -217,8 +220,8 @@ class QdrantMemoryStore(
         }
 
         val body = resp.bodyAsText()
-        println("QDRANT_DELETE_STATUS=${resp.status}")
-        println("QDRANT_DELETE_BODY_PREVIEW=${body.redactedForLog()}")
+        logger.debug("Qdrant delete status={}", resp.status)
+        logger.trace("Qdrant delete body preview={}", body.redactedForLog())
 
         return resp.status.value in 200..299
     }

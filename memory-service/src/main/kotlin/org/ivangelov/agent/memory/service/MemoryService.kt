@@ -112,13 +112,16 @@ class MemoryService(
                     ".java" in it
         }
 
+        fun matchesMentionedFile(hit: MemoryHit): Boolean =
+            mentionedFile != null &&
+                    hit.text.contains("FILE:", ignoreCase = true) &&
+                    hit.text.contains(mentionedFile, ignoreCase = true)
+
         val rankedHits = when {
             scope == MemoryScope.PROJECT -> {
-                val fileMatchedHits = if (mentionedFile != null) {
-                    cleanedHits
-                        .filter { it.text.contains("FILE:", ignoreCase = true) && it.text.contains(mentionedFile, ignoreCase = true) }
-                        .sortedByDescending { it.score }
-                } else emptyList()
+                val fileMatchedHits = cleanedHits
+                    .filter(::matchesMentionedFile)
+                    .sortedByDescending { it.score }
 
                 val projectInfoHits = cleanedHits
                     .filter { it.type == MemoryType.PROJECT_INFO }
@@ -150,7 +153,8 @@ class MemoryService(
                     }
                     .sortedByDescending { it.score }
 
-                projectInfoHits + decisionHits + noteHits + toolResultHits + turnHits + otherHits
+                (fileMatchedHits + projectInfoHits + decisionHits + noteHits + toolResultHits + turnHits + otherHits)
+                    .distinctBy { it.id }
             }
 
             architectureLike -> {
@@ -187,28 +191,24 @@ class MemoryService(
 
         val finalHits = when {
             scope == MemoryScope.PROJECT -> {
-                val filePreferred = if (mentionedFile != null) {
-                    rankedHits.filter { it.text.contains(mentionedFile, ignoreCase = true) }
-                } else emptyList()
-
-                when {
-                    filePreferred.isNotEmpty() -> filePreferred.take(topK)
-                    else -> rankedHits.take(topK)
-                }
-
-                val preferredHits = rankedHits
+                val filePreferred = rankedHits.filter(::matchesMentionedFile)
+                val contextualPreferred = rankedHits
+                    .filterNot(::matchesMentionedFile)
                     .filter {
                         it.type == MemoryType.PROJECT_INFO ||
                                 it.type == MemoryType.PROJECT_DECISION ||
                                 it.type == MemoryType.PROJECT_NOTE
                     }
-                    .take(topK)
 
-                if (preferredHits.isNotEmpty()) {
-                    preferredHits
-                } else {
-                    rankedHits.take(topK)
-                }
+                val fallback = rankedHits
+                    .filterNot { hit ->
+                        filePreferred.any { it.id == hit.id } ||
+                                contextualPreferred.any { it.id == hit.id }
+                    }
+
+                (filePreferred + contextualPreferred + fallback)
+                    .distinctBy { it.id }
+                    .take(topK)
             }
 
             architectureLike || fileReviewLike -> {
