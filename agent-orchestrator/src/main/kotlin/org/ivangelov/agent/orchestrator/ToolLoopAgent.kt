@@ -1050,6 +1050,14 @@ class ToolLoopAgentFacade(
             val validatedPlan = when (planResult) {
                 is AgentResult.Success -> planResult.value
                 is AgentResult.Failure -> {
+                    if (mode == RequestMode.ANALYSIS && looksLikeLlmTimeout(planResult.error)) {
+                        failWithMessage(
+                            "Die Analyse wurde abgebrochen, weil das lokale LLM in ein Timeout gelaufen ist. Bitte grenze die Anfrage auf eine konkrete Datei oder Funktion ein.",
+                            emit
+                        )
+                        return
+                    }
+
                     state.validationFailures++
                     if (state.validationFailures > maxValidationFailures) {
                         failWithMessage("Tool-Plan konnte nicht korrigiert werden.", emit)
@@ -1072,6 +1080,35 @@ class ToolLoopAgentFacade(
 
                     if (state.nonJsonViolations > maxNonJsonViolations) {
                         failWithMessage("Das Modell hat mehrfach keinen verwertbaren Plan geliefert.", emit)
+                        return
+                    }
+                    continue
+                }
+
+                val finalReplyError = validateFinalReplyWithoutTools(
+                    reply = finalReply,
+                    projectId = projectId,
+                    hasProjectContext = retrieved.isNotEmpty(),
+                    modificationRequested = mode == RequestMode.MODIFICATION
+                )
+
+                if (finalReplyError != null) {
+                    repo.appendMessage(
+                        conversationId,
+                        Role.TOOL,
+                        """
+                        [tool_validation_error]
+                        $finalReplyError
+
+                        Return corrected JSON only.
+                        Do not claim files were changed unless a mutating tool was executed successfully.
+                        For analysis requests, answer with concrete findings based on read_file or retrieved project context.
+                        """.trimIndent()
+                    )
+
+                    state.validationFailures++
+                    if (state.validationFailures > maxValidationFailures) {
+                        failWithMessage("Tool-Plan konnte nicht korrigiert werden.", emit)
                         return
                     }
                     continue
@@ -2294,13 +2331,13 @@ class ToolLoopAgentFacade(
         val topK = when (mode) {
             RequestMode.SCAFFOLDING -> 4
             RequestMode.MODIFICATION -> 6
-            RequestMode.ANALYSIS -> 6
+            RequestMode.ANALYSIS -> 3
         }
 
         val maxChars = when (mode) {
             RequestMode.SCAFFOLDING -> 700
             RequestMode.MODIFICATION -> 1000
-            RequestMode.ANALYSIS -> 900
+            RequestMode.ANALYSIS -> 500
         }
 
         val raw = memoryCoordinator.retrieveForToolLoop(
@@ -2328,7 +2365,12 @@ class ToolLoopAgentFacade(
                 c.startsWith("Projektdatei erfolgreich geändert:") ||
                         c.startsWith("Projektentscheidung:")
             }
-            else -> raw
+            RequestMode.ANALYSIS -> raw.filterNot {
+                looksLikeStaleMutationMemory(it.content)
+            }
+            RequestMode.MODIFICATION -> raw.filterNot {
+                looksLikeStaleMutationMemory(it.content)
+            }
         }
 
         return filtered
@@ -2339,7 +2381,7 @@ class ToolLoopAgentFacade(
 
     private fun compressRetrievedChunk(content: String, maxChars: Int): String {
         val normalized = content
-            .replace(Regex("""FILE:[^\n\r]+""")) { match ->
+            .replace(Regex("""FILE:[^\s\n\r]+""")) { match ->
                 val raw = match.value.removePrefix("FILE:")
                 val relative = pathResolver.absoluteToProjectRelative(raw) ?: raw
                 "FILE:$relative"
@@ -2484,6 +2526,10 @@ class ToolLoopAgentFacade(
             return "Plan rejected: generic completion reply without tool calls. Use tools or provide a concrete project-specific answer."
         }
 
+        if (projectId != null && looksLikeMutationCompletionWithoutTools(reply)) {
+            return "Plan rejected: reply claims files were changed without mutating tool calls."
+        }
+
         if (projectId != null && looksLikeCode(reply)) {
             return "Plan rejected: reply contains code but no tool calls were made. Read project files first and do not invent code."
         }
@@ -2542,6 +2588,51 @@ class ToolLoopAgentFacade(
         )
 
         return blockedPatterns.none { it in t }
+    }
+
+    private fun looksLikeLlmTimeout(error: AgentError): Boolean {
+        if (error !is AgentError.LlmFailure) return false
+        val message = error.message.lowercase()
+        return "timeout" in message || "httprequesttimeoutexception" in message
+    }
+
+    private fun looksLikeMutationCompletionWithoutTools(text: String): Boolean {
+        val t = text.lowercase().trim()
+
+        val mutationSignals = listOf(
+            "wurde erfolgreich kommentiert",
+            "wurde erfolgreich verbessert",
+            "wurde erfolgreich geaendert",
+            "wurde erfolgreich geändert",
+            "datei wurde kommentiert",
+            "datei wurde verbessert",
+            "datei wurde geändert",
+            "datei wurde geaendert",
+            "kommentiert und verbessert",
+            "änderungen wurden durchgeführt",
+            "aenderungen wurden durchgefuehrt",
+            "successfully updated",
+            "successfully modified",
+            "successfully commented"
+        )
+
+        return mutationSignals.any { it in t }
+    }
+
+    private fun looksLikeStaleMutationMemory(content: String): Boolean {
+        val t = content.lowercase().trim()
+
+        val staleSignals = listOf(
+            "projektdatei erfolgreich",
+            "wurde erfolgreich kommentiert",
+            "wurde erfolgreich verbessert",
+            "datei wurde erfolgreich",
+            "kommentiert und verbessert",
+            "änderungen wurden durchgeführt",
+            "aenderungen wurden durchgefuehrt"
+        )
+
+        return staleSignals.any { it in t }
     }
 
     private fun looksLikeProjectDecisionConfirmation(userText: String): Boolean {
