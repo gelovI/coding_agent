@@ -1016,6 +1016,21 @@ class ToolLoopAgentFacade(
         emit: suspend (AgentEvent) -> Unit
     ) {
         println("AGENT_STATE_ENTER: ANALYSIS_FLOW")
+
+        val retrieved = retrieveContextForMode(
+            userText = sanitizedUserText,
+            mode = RequestMode.ANALYSIS
+        )
+
+        if (retrieved.isNotEmpty()) {
+            finalizeAnalysisFromRetrievedContext(
+                userText = sanitizedUserText,
+                retrieved = retrieved,
+                emit = emit
+            )
+            return
+        }
+
         runGenericToolLoop(
             sanitizedUserText = sanitizedUserText,
             emit = emit,
@@ -2217,6 +2232,55 @@ class ToolLoopAgentFacade(
         finalizeAssistantReply(final, emit)
     }
 
+    private suspend fun finalizeAnalysisFromRetrievedContext(
+        userText: String,
+        retrieved: List<ChatMessage>,
+        emit: suspend (AgentEvent) -> Unit
+    ) {
+        val retrievedContext = retrieved.joinToString("\n\n") { it.content }
+
+        val analysisMessages = promptBuilder.buildForKnowledge(
+            listOf(
+                ChatMessage(
+                    Role.SYSTEM,
+                    """
+                    Antworte nur anhand des bereitgestellten Projektkontexts.
+                    Nenne konkrete Dateien, Klassen oder Funktionen, wenn sie im Kontext sichtbar sind.
+                    Gib keine allgemeinen Android-Ratschläge ohne Bezug zum Kontext.
+                    Behaupte nicht, Dateien geändert zu haben.
+                    Wenn der Kontext für eine sichere Aussage nicht reicht, sage kurz, welche Datei gezielt gelesen werden sollte.
+                    """.trimIndent()
+                ),
+                ChatMessage(Role.USER, userText),
+                ChatMessage(Role.TOOL, "[retrieved_project_context]\n$retrievedContext")
+            )
+        )
+
+        val analysisCtx = ContextPack(
+            pinned = emptyList(),
+            retrieved = emptyList(),
+            recentSummary = null
+        )
+
+        val analysisResp = runCatching {
+            llm.complete(
+                analysisMessages,
+                analysisCtx,
+                LlmResponseFormat.TEXT
+            )
+        }.getOrElse { e ->
+            failWithMessage("LLM_ERROR: ${e::class.simpleName}: ${e.message}", emit)
+            return
+        }
+
+        val final = analysisResp.content?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: analysisResp.thinking?.trim()?.takeIf { it.isNotBlank() }
+            ?: "Ich konnte aus dem gefundenen Projektkontext keine konkrete Analyse erzeugen."
+
+        finalizeAssistantReply(final, emit)
+    }
+
     private suspend fun finalizeAssistantReply(
         text: String,
         emit: suspend (AgentEvent) -> Unit
@@ -2530,6 +2594,10 @@ class ToolLoopAgentFacade(
             return "Plan rejected: reply claims files were changed without mutating tool calls."
         }
 
+        if (projectId != null && looksLikeToolCompletionEcho(reply)) {
+            return "Plan rejected: reply echoes a tool completion instead of answering the user."
+        }
+
         if (projectId != null && looksLikeCode(reply)) {
             return "Plan rejected: reply contains code but no tool calls were made. Read project files first and do not invent code."
         }
@@ -2624,6 +2692,8 @@ class ToolLoopAgentFacade(
 
         val staleSignals = listOf(
             "projektdatei erfolgreich",
+            "indexierung abgeschlossen",
+            "qdrant-punkte gesamt",
             "wurde erfolgreich kommentiert",
             "wurde erfolgreich verbessert",
             "datei wurde erfolgreich",
@@ -2633,6 +2703,20 @@ class ToolLoopAgentFacade(
         )
 
         return staleSignals.any { it in t }
+    }
+
+    private fun looksLikeToolCompletionEcho(text: String): Boolean {
+        val t = text.lowercase().trim()
+
+        val toolEchoSignals = listOf(
+            "indexierung abgeschlossen",
+            "qdrant-punkte gesamt",
+            "startpfad:",
+            "extensions:",
+            "limit:"
+        )
+
+        return toolEchoSignals.count { it in t } >= 2
     }
 
     private fun looksLikeProjectDecisionConfirmation(userText: String): Boolean {
