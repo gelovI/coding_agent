@@ -20,6 +20,18 @@ Dieses Projekt demonstriert, wie man einen produktionsnahen LLM-Agenten mit klar
 
 ---
 
+## Aktueller Entwicklungsstand
+
+- Project-Memory priorisiert explizit angefragte Dateien beim Retrieval.
+- Projektindexierung nutzt einen gemeinsamen File-Filter fuer generierte, binaere und grosse Dateien.
+- Analyse- und Tool-Modus sind getrennt vorbereitet, damit reine Codefragen nicht unnoetig mutierende Tools ausloesen.
+- Infrastruktur-Logging in Ollama- und Qdrant-Adaptern erfolgt ueber SLF4J statt direkter Konsolenausgaben.
+- Regressionstests decken Memory-Ranking, Request-Erkennung, Pfadaufloesung und Index-Filter ab.
+
+Hinweis: Lokale Gradle-Verifikation kann fehlschlagen, wenn der Java-Truststore die verwendeten Maven-/Gradle-Zertifikate nicht vertraut (PKIX/SSL).
+
+---
+
 ## 🏗 Architektur
 
 Das System folgt einer modularen, geschichteten Architektur:
