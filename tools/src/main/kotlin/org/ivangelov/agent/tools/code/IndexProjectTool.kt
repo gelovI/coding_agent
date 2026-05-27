@@ -13,6 +13,7 @@ import org.ivangelov.agent.memory.core.MemoryType
 import org.ivangelov.agent.memory.service.MemoryService
 import org.ivangelov.agent.tools.Tool
 import org.ivangelov.agent.tools.code.indexing.CodeChunker
+import org.ivangelov.agent.tools.code.indexing.ProjectFileFilter
 import org.ivangelov.agent.tools.fs.ExecutionGuard
 
 class IndexProjectTool(
@@ -40,7 +41,13 @@ class IndexProjectTool(
         }
 
         val candidateFiles = fs.listRecursively(start)
-            .filter { path -> shouldIndex(path, options.includeExtensions) }
+            .filter { path ->
+                ProjectFileFilter.shouldIndex(
+                    path = path,
+                    fs = fs,
+                    includeExtensions = options.includeExtensions
+                )
+            }
             .take(options.maxFiles)
             .toList()
 
@@ -138,7 +145,7 @@ class IndexProjectTool(
             ?: 500
 
         val includeExtensions = parseIncludeExtensions(call)
-            .ifEmpty { setOf("kt", "kts", "gradle", "xml", "json", "md") }
+            .ifEmpty { ProjectFileFilter.defaultIncludedExtensions }
 
         return IndexOptions(
             path = path,
@@ -163,20 +170,6 @@ class IndexProjectTool(
             .toSet()
     }
 
-    private fun shouldIndex(path: Path, includeExtensions: Set<String>): Boolean {
-        if (fs.metadata(path).isDirectory) return false
-        if (path.segments.any { it in skippedDirectories }) return false
-
-        val extension = path.name.substringAfterLast('.', missingDelimiterValue = "")
-            .lowercase()
-
-        if (extension == "gradle" && path.name.endsWith(".gradle.kts")) {
-            return "gradle" in includeExtensions || "kts" in includeExtensions
-        }
-
-        return extension in includeExtensions
-    }
-
     private fun makeRelativeToRoot(path: Path): String {
         val rootSegments = root.normalized().segments
         val pathSegments = path.normalized().segments
@@ -192,13 +185,4 @@ class IndexProjectTool(
         val includeExtensions: Set<String>
     )
 
-    private companion object {
-        val skippedDirectories = setOf(
-            ".git",
-            ".gradle",
-            "build",
-            "out",
-            ".idea"
-        )
-    }
 }

@@ -16,4 +16,5 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.contentneg)
     implementation(libs.ktor.serialization.json)
+    implementation(libs.slf4j)
 }

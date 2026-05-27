@@ -25,12 +25,15 @@ import org.ivangelov.agent.core.agent.AgentError
 import org.ivangelov.agent.core.agent.AgentResult
 import org.ivangelov.agent.core.agent.PlanParser
 import org.ivangelov.agent.core.ports.ToolModeResponse
+import org.slf4j.LoggerFactory
 
 class OllamaLlmClient(
     private val baseUrl: String = "http://localhost:11434",
     private val model: String = "qwen2.5-coder:7b",
     private val http: HttpClient = HttpClients.llm
 ) : LLMClient {
+
+    private val logger = LoggerFactory.getLogger(OllamaLlmClient::class.java)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -119,9 +122,8 @@ class OllamaLlmClient(
 
             val body = resp.bodyAsText()
 
-            println("TOOL_MODE_HTTP_STATUS=${resp.status}")
-            println("TOOL_MODE_BODY_PREVIEW=${body.redactedForLog()}")
-
+            logger.debug("Tool-mode Ollama response status={}", resp.status)
+            logger.trace("Tool-mode Ollama body preview={}", body.redactedForLog())
 
             if (!resp.status.isSuccess()) {
                 return AgentResult.Failure(
@@ -169,9 +171,11 @@ class OllamaLlmClient(
                 else -> payload?.content
             }
 
-            println("DEBUG_COMPLETE_TOOL_MODE_FINAL")
-            println("finalToolCalls=${finalToolCalls.map { it.name }}")
-            println("finalReplyPreview=${finalReply.orEmpty().redactedForLog()}")
+            logger.debug(
+                "Tool-mode parsed result toolCalls={} replyPreview={}",
+                finalToolCalls.map { it.name },
+                finalReply.orEmpty().redactedForLog()
+            )
 
             AgentResult.Success(
                 ToolModeResponse(

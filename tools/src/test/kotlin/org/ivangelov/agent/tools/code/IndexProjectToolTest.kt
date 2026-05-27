@@ -161,7 +161,7 @@ class IndexProjectToolTest {
     }
 
     @Test
-    fun indexProjectSkipsBuildAndGitDirectories() = runBlocking {
+    fun indexProjectSkipsGeneratedInternalAndDependencyDirectories() = runBlocking {
         val root = tempRoot()
         val store = FakeMemoryStore()
         val memory = MemoryService(
@@ -173,10 +173,14 @@ class IndexProjectToolTest {
             File(root, "src").mkdirs()
             File(root, "build").mkdirs()
             File(root, ".git").mkdirs()
+            File(root, ".kotlin").mkdirs()
+            File(root, "node_modules/pkg").mkdirs()
 
             File(root, "src/App.kt").writeText("class App")
             File(root, "build/Generated.kt").writeText("class Generated")
             File(root, ".git/Hidden.kt").writeText("class Hidden")
+            File(root, ".kotlin/Generated.kt").writeText("class KotlinGenerated")
+            File(root, "node_modules/pkg/Dependency.kt").writeText("class Dependency")
 
             val tool = IndexProjectTool(
                 root = root.absolutePath.toPath(),
@@ -204,6 +208,8 @@ class IndexProjectToolTest {
             assertContains(indexedText, "FILE:src/App.kt")
             assertFalse(indexedText.contains("Generated.kt"))
             assertFalse(indexedText.contains("Hidden.kt"))
+            assertFalse(indexedText.contains("KotlinGenerated.kt"))
+            assertFalse(indexedText.contains("Dependency.kt"))
         } finally {
             root.deleteRecursively()
         }

@@ -10,6 +10,7 @@ import org.ivangelov.agent.memory.service.MemoryService
 import org.ivangelov.agent.orchestrator.memory.DefaultMemoryCoordinator
 import org.ivangelov.agent.orchestrator.memory.MemoryCoordinator
 import okio.FileSystem
+import org.ivangelov.agent.tools.code.indexing.ProjectFileFilter
 
 class AppDependencies private constructor(
     val logger: Logger,
@@ -77,7 +78,7 @@ class AppDependencies private constructor(
 
                 val indexedFiles = fs.listRecursively(root)
                     .filter { path ->
-                        runCatching { !fs.metadata(path).isDirectory }.getOrDefault(false)
+                        ProjectFileFilter.shouldIndex(path = path, fs = fs)
                     }
                     .toList()
 
